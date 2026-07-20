@@ -1,0 +1,28 @@
+{
+  "name": "fair-bounty-judge-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Escrow, verdict evidence, and dispute resolution for Fair Bounty Judge.",
+  "type": "module",
+  "scripts": {
+    "build": "hardhat build",
+    "clean": "hardhat clean",
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "typecheck": "tsc --noEmit",
+    "test:coverage": "hardhat coverage",
+    "deploy:amoy": "hardhat run scripts/deploy.ts --network amoy",
+    "bounty:create": "hardhat run scripts/createBounty.ts --network amoy --",
+    "bounty:submit-verdict": "hardhat run scripts/submitVerdict.ts --network amoy --",
+    "bounty:release": "hardhat run scripts/releaseBounty.ts --network amoy --",
+    "bounty:open-dispute": "hardhat run scripts/openDispute.ts --network amoy --",
+    "bounty:resolve-dispute": "hardhat run scripts/resolveDispute.ts --network amoy --"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.0",
+    "@openzeppelin/contracts": "^5.4.0",
+    "dotenv": "^16.6.1",
+    "hardhat": "^3.0.0",
+    "typescript": "~5.8.3"
+  }
+}

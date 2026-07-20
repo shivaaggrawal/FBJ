@@ -1,0 +1,1 @@
+"""Fair Bounty Judge API."""
