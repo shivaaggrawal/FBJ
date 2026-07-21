@@ -35,8 +35,7 @@ class Store:
     self,
     review_id: str,
     results: list[dict[str, Any]],
-) -> None:
-    ...
+) -> None: ...
 
 
 async def save_evidence(
