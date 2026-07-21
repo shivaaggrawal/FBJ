@@ -24,7 +24,7 @@ The API accepts registered bounty metadata, receives signed GitHub pull-request 
 
 Core endpoints:
 
-- `POST /api/bounties` registers the GitHub-to-on-chain bounty mapping.
+- `POST /api/bounties` registers a bounty only after fixture creation or verified on-chain creation.
 - `GET /api/bounties` and `GET /api/bounties/{contract_bounty_id}` return local lifecycle state.
 - `POST /api/reviews/fixture` runs the deterministic local review and persists its exact evidence bytes.
 - `GET /api/reviews/{review_id}` and `GET /api/reviews/{review_id}/evidence` expose review state and the canonical JSON that was hashed.
@@ -32,3 +32,13 @@ Core endpoints:
 - `POST /api/bounties/{contract_bounty_id}/release` calls `BountyEscrow.releaseBounty` after the contract's challenge window has passed.
 
 Set `FIXTURE_MODE=false`, `DATABASE_MODE=mongodb`, `IPFS_PROVIDER=pinata`, and the deployment values in `.env` to enable the real Amoy + Pinata flow. The relayer private key must only hold `RELAYER_ROLE`; review code must never receive it.
+
+## Creating A Real Bounty
+
+The API deliberately does not hold a maintainer private key. A maintainer wallet must approve the ERC-20 and call `BountyEscrow.createBounty`; the API then verifies the confirmed transaction, the `BountyCreated` event, the escrow fields, and a wallet signature before it saves the GitHub mapping.
+
+1. Set the deployed Amoy addresses and `FIXTURE_MODE=false` in `apps/api/.env`, then start MongoDB and the API.
+2. From `Blockchain/`, set the same escrow address and the maintainer wallet in its local `.env`, then run `npm.cmd run bounty:create -- <escrow> <token-or-zero-address> <bounty-id> <token-smallest-unit-amount> <expiry-unix>`.
+3. Submit the creation metadata, transaction hash, and maintainer signature to `POST /api/bounties`. Request `POST /api/bounties/registration-message` with the same payload first to obtain the exact message to sign with `personal_sign`.
+
+`expires_at` is the exact Unix timestamp submitted to the contract. `challenge_seconds` is retained as application metadata; the deployed `VerdictRegistry` challenge period controls the actual on-chain release delay.

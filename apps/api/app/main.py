@@ -8,13 +8,15 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response, status
 
 from .attestation import AttestationError, attest_review, release_bounty
+from .bounties import BountyRegistrationError, registration_message, verify_on_chain_bounty
 from .chain import ChainClient, build_chain_client
 from .config import Settings, get_settings
 from .github import GitHubAppClient
 from .ipfs import FixtureIpfsClient, IpfsClient, build_ipfs_client
 from .schemas import (
     AttestationRequest,
-    BountyCreateRequest,
+    BountyRegistrationMessageResponse,
+    BountyRegistrationRequest,
     BountyResponse,
     GitHubWebhookResponse,
     ReviewInput,
@@ -75,10 +77,31 @@ async def review_fixture(review: ReviewInput, store: Store = Depends(get_store),
     return await process_fixture_review(store, ipfs, record["id"], review, settings)
 
 
-@app.post("/api/bounties", response_model=BountyResponse, status_code=status.HTTP_201_CREATED)
-async def create_bounty(bounty: BountyCreateRequest, store: Store = Depends(get_store)) -> dict:
+@app.post("/api/bounties/registration-message", response_model=BountyRegistrationMessageResponse)
+async def bounty_registration_message(bounty: BountyRegistrationRequest, settings: Settings = Depends(get_settings)) -> dict:
+    if settings.fixture_mode:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration signatures are only used for on-chain bounties")
     try:
-        return await store.create_bounty(bounty.model_dump() | {"status": "open"})
+        return {"message": registration_message(bounty, settings)}
+    except BountyRegistrationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@app.post("/api/bounties", response_model=BountyResponse, status_code=status.HTTP_201_CREATED)
+async def create_bounty(
+    bounty: BountyRegistrationRequest,
+    store: Store = Depends(get_store),
+    chain: ChainClient = Depends(get_chain),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    values = bounty.model_dump(exclude={"registration_signature"})
+    if not settings.fixture_mode:
+        try:
+            values.update(await verify_on_chain_bounty(bounty, chain, settings))
+        except BountyRegistrationError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    try:
+        return await store.create_bounty(values | {"status": "open"})
     except DuplicateBounty as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bounty is already registered") from exc
 

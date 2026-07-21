@@ -15,7 +15,7 @@ webhook_secret = settings.github_webhook_secret.get_secret_value()
 def create_bounty():
     return client.post("/api/bounties", json={"contract_bounty_id": "0x" + "ab" * 32, "repository": repository,
         "issue_url": f"https://github.com/{repository}/issues/1", "reward_token": "0x" + "12" * 20,
-        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "challenge_seconds": 3600})
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600})
 
 
 def test_health():
@@ -51,7 +51,7 @@ def test_fixture_review_persists_evidence_and_supports_attestation():
     bounty_id = "0x" + "cd" * 32
     bounty = client.post("/api/bounties", json={"contract_bounty_id": bounty_id, "repository": "owner/attestation-demo",
         "issue_url": "https://github.com/owner/attestation-demo/issues/1", "reward_token": "0x" + "56" * 20,
-        "reward_amount": "1000000", "maintainer_wallet": "0x" + "78" * 20, "challenge_seconds": 3600})
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "78" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600})
     assert bounty.status_code == 201
 
     review = client.post("/api/reviews/fixture", json={"bounty_id": bounty_id, "repository": "owner/attestation-demo",

@@ -21,6 +21,7 @@ class ChainError(RuntimeError):
 
 
 class ChainClient:
+    async def verify_bounty_creation(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]: ...
     async def submit_verdict(self, bounty_id: str, evidence_hash: str, evidence_cid: str, recipient: str, final_score_bps: int) -> dict[str, Any]: ...
     async def release_bounty(self, bounty_id: str) -> dict[str, Any]: ...
     async def get_bounty(self, bounty_id: str) -> dict[str, Any]: ...
@@ -39,8 +40,17 @@ def _bytes32(value: str, field: str) -> bytes:
 class FixtureChainClient(ChainClient):
     def __init__(self, chain_id: int) -> None:
         self._chain_id = chain_id
+        self._bounties: dict[str, dict[str, Any]] = {}
         self._verdicts: dict[str, dict[str, Any]] = {}
         self._released: set[str] = set()
+
+    async def verify_bounty_creation(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]:
+        _bytes32(bounty_id, "bounty_id")
+        if not transaction_hash.startswith("0x") or len(transaction_hash) != 66:
+            raise ChainError("creation transaction hash is invalid")
+        if bounty_id not in self._bounties:
+            raise ChainError("Fixture chain has no matching created bounty")
+        return {"transaction_hash": transaction_hash, "block_number": 1, "network": f"fixture-{self._chain_id}", "status": "confirmed"}
 
     async def submit_verdict(self, bounty_id: str, evidence_hash: str, evidence_cid: str, recipient: str, final_score_bps: int) -> dict[str, Any]:
         _bytes32(bounty_id, "bounty_id")
@@ -65,6 +75,8 @@ class FixtureChainClient(ChainClient):
         return {"transaction_hash": "0x" + hashlib.sha256(f"release:{bounty_id}".encode()).hexdigest(), "network": f"fixture-{self._chain_id}", "status": "confirmed"}
 
     async def get_bounty(self, bounty_id: str) -> dict[str, Any]:
+        if bounty_id in self._bounties:
+            return self._bounties[bounty_id]
         return {"bounty_id": bounty_id, "status": "paid_out" if bounty_id in self._released else "verdict_submitted" if bounty_id in self._verdicts else "open"}
 
     async def get_verdict(self, bounty_id: str) -> dict[str, Any]:
@@ -98,6 +110,32 @@ class Web3ChainClient(ChainClient):
         if receipt.status != 1:
             raise ChainError("EVM transaction reverted")
         return {"transaction_hash": transaction_hash.hex(), "network": str(self._chain_id), "status": "confirmed", "block_number": receipt.blockNumber}
+
+    async def verify_bounty_creation(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]:
+        _bytes32(bounty_id, "bounty_id")
+        if not isinstance(transaction_hash, str) or not transaction_hash.startswith("0x") or len(transaction_hash) != 66:
+            raise ChainError("creation transaction hash is invalid")
+        try:
+            receipt = self._web3.eth.get_transaction_receipt(transaction_hash)
+        except Exception as exc:
+            raise ChainError("creation transaction was not found or is not confirmed") from exc
+        if receipt.status != 1:
+            raise ChainError("creation transaction reverted")
+        if not receipt.to or receipt.to.lower() != self._escrow.address.lower():
+            raise ChainError("creation transaction was not sent to the configured escrow")
+        try:
+            events = self._escrow.events.BountyCreated().process_receipt(receipt)
+        except Exception as exc:
+            raise ChainError("creation transaction did not emit a readable BountyCreated event") from exc
+        expected_id = bounty_id.lower()
+        if not any(self._web3.to_hex(event["args"]["bountyId"]).lower() == expected_id for event in events):
+            raise ChainError("creation transaction did not create the requested bounty")
+        return {
+            "transaction_hash": receipt.transactionHash.hex(),
+            "block_number": receipt.blockNumber,
+            "network": str(self._chain_id),
+            "status": "confirmed",
+        }
 
     async def submit_verdict(self, bounty_id: str, evidence_hash: str, evidence_cid: str, recipient: str, final_score_bps: int) -> dict[str, Any]:
         call = self._registry.functions.submitVerdict(_bytes32(bounty_id, "bounty_id"), _bytes32(evidence_hash, "evidence_hash"), evidence_cid, self._web3.to_checksum_address(recipient), final_score_bps)

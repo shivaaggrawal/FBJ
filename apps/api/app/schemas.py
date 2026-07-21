@@ -139,6 +139,7 @@ class BountyCreateRequest(BaseModel):
             "reward_amount": "1000000",
             "maintainer_wallet": "0x1111111111111111111111111111111111111111",
             "recipient_wallet": "0x2222222222222222222222222222222222222222",
+            "expires_at": 1_800_000_000,
             "challenge_seconds": 86400,
         }],
     })
@@ -151,12 +152,24 @@ class BountyCreateRequest(BaseModel):
     reward_amount: str = Field(pattern=r"^[1-9][0-9]*$")
     maintainer_wallet: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
     recipient_wallet: str | None = Field(default=None, pattern=r"^0x[0-9a-fA-F]{40}$")
+    expires_at: int = Field(gt=0, description="Unix timestamp passed to BountyEscrow.createBounty.")
     challenge_seconds: int = Field(gt=0)
+
+
+class BountyRegistrationRequest(BountyCreateRequest):
+    creation_tx_hash: str | None = Field(default=None, pattern=r"^0x[0-9a-fA-F]{64}$")
+    registration_signature: str | None = Field(default=None, min_length=1)
 
 
 class BountyResponse(BountyCreateRequest):
     id: str
     status: str
+    chain_id: int | None = None
+    creation_tx_hash: str | None = None
+
+
+class BountyRegistrationMessageResponse(BaseModel):
+    message: str
 
 
 class GitHubWebhookResponse(BaseModel):
