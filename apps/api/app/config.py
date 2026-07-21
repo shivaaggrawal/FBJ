@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     ai_provider: str = "fixture"
     ai_model: str = "fixture-v1"
     ipfs_provider: str = "fixture"
+    pinata_jwt: SecretStr | None = None
+    pinata_api_url: str = "https://api.pinata.cloud/pinning/pinFileToIPFS"
+    ipfs_gateway_url: str = "https://gateway.pinata.cloud/ipfs"
     amoy_rpc_url: str | None = None
     chain_id: int = 80002
     bounty_escrow_address: str | None = None
@@ -47,6 +50,8 @@ class Settings(BaseSettings):
                 "DISPUTE_MANAGER_ADDRESS": bool(self.dispute_manager_address),
                 "REWARD_TOKEN_ADDRESS": bool(self.reward_token_address),
                 "RELAYER_PRIVATE_KEY": self.relayer_private_key is not None,
+                "IPFS_PROVIDER": self.ipfs_provider == "pinata",
+                "PINATA_JWT": self.pinata_jwt is not None,
             }
             missing = [key for key, configured in required.items() if not configured]
             if missing:

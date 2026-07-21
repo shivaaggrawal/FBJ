@@ -1,10 +1,18 @@
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from .config import Settings
 from .evidence import build_evidence, evidence_hash
 from .schemas import AgentName, AgentResult, EvidenceBundle, ReviewInput, ReviewResponse, SupervisorResult
+
+
+@dataclass(frozen=True)
+class ReviewArtifact:
+    response: ReviewResponse
+    evidence_bytes: bytes
+    agent_results: list[AgentResult]
 
 
 async def fixture_agent(agent: AgentName, review: ReviewInput, settings: Settings) -> AgentResult:
@@ -27,7 +35,7 @@ def supervise(results: list[AgentResult]) -> SupervisorResult:
     return SupervisorResult(final_score_bps=final_score, eligible=final_score >= 7000 and not reasons, flagged=bool(reasons), flag_reasons=reasons)
 
 
-async def run_review(review: ReviewInput, settings: Settings) -> ReviewResponse:
+async def run_review_artifact(review: ReviewInput, settings: Settings) -> ReviewArtifact:
     results = await asyncio.gather(*(fixture_agent(agent, review, settings) for agent in AgentName))
     supervisor = supervise(list(results))
     evidence = EvidenceBundle(bounty_id=review.bounty_id, repository=review.repository, pr_number=review.pull_request_number,
@@ -35,5 +43,11 @@ async def run_review(review: ReviewInput, settings: Settings) -> ReviewResponse:
         confidence_bps=round(sum(r.confidence_bps for r in results) / len(results)), agent_scores=[],
         reasoning="Deterministic fixture workflow; no external AI provider was called.", flagged=supervisor.flagged,
         flag_reasons=supervisor.flag_reasons)
-    digest = evidence_hash(build_evidence(evidence, list(results)))
-    return ReviewResponse(request_id=str(uuid4()), review_id=str(uuid4()), status="flagged" if supervisor.flagged else "completed", supervisor=supervisor, evidence_hash=digest)
+    evidence_bytes = build_evidence(evidence, list(results))
+    digest = evidence_hash(evidence_bytes)
+    response = ReviewResponse(request_id=str(uuid4()), review_id=str(uuid4()), status="flagged" if supervisor.flagged else "completed", supervisor=supervisor, evidence_hash=digest)
+    return ReviewArtifact(response=response, evidence_bytes=evidence_bytes, agent_results=list(results))
+
+
+async def run_review(review: ReviewInput, settings: Settings) -> ReviewResponse:
+    return (await run_review_artifact(review, settings)).response

@@ -35,12 +35,12 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 - [ ] Deploy with `npm.cmd run deploy:amoy` and save the returned chain ID and three contract addresses in non-secret application configuration.
 - [ ] Verify each deployed contract on the selected explorer if time permits.
 - [ ] Confirm roles after deployment: registry has escrow registry role; dispute manager has escrow dispute role; relayer has registry relayer role; resolver has dispute role.
-- [ ] Add an application contract configuration object: `chainId`, `bountyEscrow`, `verdictRegistry`, `disputeManager`, `rewardToken`.
+- [x] Add an application contract configuration object: `chainId`, `bountyEscrow`, `verdictRegistry`, `disputeManager`, `rewardToken`.
 - [ ] Generate/use ABIs and typed contract clients in the backend and dashboard.
 - [ ] Implement backend calls to existing functions:
   - [ ] `createBounty(bytes32,address,uint128,uint64)` after user approves the ERC-20 allowance.
-  - [ ] `submitVerdict(bytes32,bytes32,string,address,uint16)` from the relayer service.
-  - [ ] `releaseBounty(bytes32)` after the challenge deadline.
+  - [x] `submitVerdict(bytes32,bytes32,string,address,uint16)` from the relayer service.
+  - [x] `releaseBounty(bytes32)` after the challenge deadline.
   - [ ] `openDispute(bytes32,string)` from the connected maintainer/recipient wallet.
   - [ ] `resolveDispute(bytes32,Resolution)` from the designated resolver.
 - [ ] Subscribe to `BountyCreated`, `VerdictSubmitted`, `DisputeOpened`, `BountyPaid`, and `BountyRefunded`; persist transaction hashes and statuses.
@@ -61,8 +61,8 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 
 - [ ] Create a GitHub App with only required permissions: Checks read/write, Pull requests read/write, Contents read, Issues read.
 - [ ] Install it only on the demo repository.
-- [ ] Implement `POST /webhooks/github` and validate `X-Hub-Signature-256`.
-- [ ] Handle `pull_request` opened, synchronize, and reopened events.
+- [x] Implement `POST /webhooks/github` and validate `X-Hub-Signature-256`.
+- [x] Handle `pull_request` opened, synchronize, and reopened events.
 - [ ] Find the matching bounty by repository and issue/PR criteria.
 - [ ] Fetch the PR metadata, changed files, diff, and head commit SHA.
 - [ ] Create/update a pending GitHub Check immediately.
@@ -78,8 +78,8 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 - [ ] Implement the spam/low-effort agent with typed JSON output.
 - [ ] Run the three agents concurrently with timeout, retry, and error capture.
 - [x] Implement deterministic supervisor scoring in basis points (0–10,000).
-- [ ] Flag manual review when an agent score is below 4,000 bps or the score spread exceeds 3,500 bps.
-- [ ] Keep raw agent results, model identifier, prompt version, and timestamps.
+- [x] Flag manual review when an agent score is below 4,000 bps or the score spread exceeds 3,500 bps.
+- [x] Keep raw agent results, model identifier, prompt version, and timestamps.
 - [x] Add deterministic fixture mode for demonstrations and tests.
 - [ ] Redact secrets and cap/truncate large diffs before sending them to model providers; record any truncation.
 
@@ -88,10 +88,10 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 - [x] Define canonical evidence JSON using the blockchain README schema (`schemaVersion`, bounty ID, repo, PR, commit SHA, scores, reasoning).
 - [x] Canonicalize bytes deterministically: UTF-8, sorted keys, stable array ordering, no pretty-print whitespace.
 - [x] Calculate `keccak256` over the exact byte sequence uploaded to IPFS.
-- [ ] Upload/pin those exact bytes and store the returned CID.
+- [x] Upload/pin those exact bytes and store the returned CID.
 - [ ] Verify retrieved IPFS content hashes to the same `evidenceHash` before calling the relayer.
-- [ ] Convert the final score to the contract’s `uint16` basis-point format.
-- [ ] Send the `submitVerdict` transaction from the relayer service and store its transaction hash.
+- [x] Convert the final score to the contract’s `uint16` basis-point format.
+- [x] Send the `submitVerdict` transaction from the relayer service and store its transaction hash.
 - [ ] Include CID, verdict hash, commit SHA, score, transaction link, and eligibility in the GitHub summary.
 - [ ] Test a deliberate evidence-byte mutation and confirm verification fails before attestation.
 
