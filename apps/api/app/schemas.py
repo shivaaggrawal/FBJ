@@ -64,6 +64,7 @@ class AgentResult(BaseModel):
     model: str
     prompt_version: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    error: str | None = None
 
 
 class SupervisorResult(BaseModel):
@@ -86,6 +87,7 @@ class EvidenceBundle(BaseModel):
     reasoning: str
     flagged: bool
     flag_reasons: list[str]
+    input_truncated: bool = False
 
 
 class ReviewResponse(BaseModel):
@@ -94,6 +96,7 @@ class ReviewResponse(BaseModel):
     status: str
     supervisor: SupervisorResult
     evidence_hash: str
+    agent_results: list[AgentResult] = Field(default_factory=list)
 
 
 class BountyCreateRequest(BaseModel):

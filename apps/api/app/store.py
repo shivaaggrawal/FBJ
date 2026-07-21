@@ -24,6 +24,7 @@ class Store:
     async def create_review(self, review: dict[str, Any]) -> tuple[dict[str, Any], bool]: ...
     async def update_review(self, review_id: str, values: dict[str, Any]) -> None: ...
     async def get_review(self, review_id: str) -> dict[str, Any] | None: ...
+    async def save_agent_results(self, review_id: str, results: list[dict[str, Any]]) -> None: ...
 
 
 class MemoryStore(Store):
@@ -31,6 +32,7 @@ class MemoryStore(Store):
         self.deliveries: dict[str, dict[str, Any]] = {}
         self.bounties: dict[str, dict[str, Any]] = {}
         self.reviews: dict[str, dict[str, Any]] = {}
+        self.agent_results: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self.dedupe_keys: set[str] = set()
 
     async def ensure_indexes(self) -> None:
@@ -68,6 +70,9 @@ class MemoryStore(Store):
     async def get_review(self, review_id: str) -> dict[str, Any] | None:
         review = self.reviews.get(review_id)
         return deepcopy(review) if review else None
+
+    async def save_agent_results(self, review_id: str, results: list[dict[str, Any]]) -> None:
+        self.agent_results[review_id] = [{"review_id": review_id, **result, "created_at": utcnow()} for result in results]
 
 
 class MongoStore(Store):
@@ -129,3 +134,7 @@ class MongoStore(Store):
 
     async def get_review(self, review_id: str) -> dict[str, Any] | None:
         return await self.db.reviews.find_one({"id": review_id}, {"_id": 0})
+
+    async def save_agent_results(self, review_id: str, results: list[dict[str, Any]]) -> None:
+        if results:
+            await self.db.agent_results.insert_many([{"review_id": review_id, **result, "created_at": utcnow()} for result in results])

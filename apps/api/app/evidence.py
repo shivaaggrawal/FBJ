@@ -39,6 +39,6 @@ def build_evidence(bundle: EvidenceBundle, agent_results: list[AgentResult]) -> 
         "commitSha": payload["commit_sha"], "evaluatedAt": payload["evaluated_at"],
         "finalScoreBps": payload["final_score_bps"], "confidenceBps": payload["confidence_bps"],
         "agentScores": payload["agent_scores"], "reasoning": payload["reasoning"],
-        "flagged": payload["flagged"], "flagReasons": payload["flag_reasons"],
+        "flagged": payload["flagged"], "flagReasons": payload["flag_reasons"], "inputTruncated": payload["input_truncated"],
     }
     return canonicalize(payload)

@@ -61,27 +61,27 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 
 - [ ] Create a GitHub App with only required permissions: Checks read/write, Pull requests read/write, Contents read, Issues read.
 - [ ] Install it only on the demo repository.
-- [ ] Implement `POST /webhooks/github` and validate `X-Hub-Signature-256`.
-- [ ] Handle `pull_request` opened, synchronize, and reopened events.
-- [ ] Find the matching bounty by repository and issue/PR criteria.
-- [ ] Fetch the PR metadata, changed files, diff, and head commit SHA.
-- [ ] Create/update a pending GitHub Check immediately.
-- [ ] Post a completed check and PR summary after review.
+- [x] Implement `POST /webhooks/github` and validate `X-Hub-Signature-256`.
+- [x] Handle `pull_request` opened, synchronize, and reopened events.
+- [x] Find the matching bounty by repository and issue/PR criteria.
+- [x] Fetch the PR metadata, changed files, diff, and head commit SHA.
+- [x] Create/update a pending GitHub Check immediately.
+- [x] Post a completed check and PR summary after review.
 - [ ] Add inline annotations only when a finding can be mapped reliably to a changed line.
 - [ ] Test duplicate delivery, invalid signature, large diff, closed PR, and a PR with no matching bounty.
 
 ## 5. AI review workflow
 
-- [ ] Create the LangGraph state model and validation node.
-- [ ] Implement the quality agent with typed JSON output.
-- [ ] Implement the security agent with typed JSON output.
-- [ ] Implement the spam/low-effort agent with typed JSON output.
-- [ ] Run the three agents concurrently with timeout, retry, and error capture.
+- [x] Create the LangGraph state model and validation node.
+- [x] Implement the quality agent with typed JSON output.
+- [x] Implement the security agent with typed JSON output.
+- [x] Implement the spam/low-effort agent with typed JSON output.
+- [x] Run the three agents concurrently with timeout, retry, and error capture.
 - [x] Implement deterministic supervisor scoring in basis points (0–10,000).
 - [ ] Flag manual review when an agent score is below 4,000 bps or the score spread exceeds 3,500 bps.
-- [ ] Keep raw agent results, model identifier, prompt version, and timestamps.
+- [x] Keep raw agent results, model identifier, prompt version, and timestamps.
 - [x] Add deterministic fixture mode for demonstrations and tests.
-- [ ] Redact secrets and cap/truncate large diffs before sending them to model providers; record any truncation.
+- [x] Redact secrets and cap/truncate large diffs before sending them to model providers; record any truncation.
 
 ## 6. Evidence, IPFS, and attestation
 

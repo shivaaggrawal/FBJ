@@ -8,9 +8,10 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
 
 from .config import Settings, get_settings
+from .github import GitHubAppClient
 from .schemas import BountyCreateRequest, BountyResponse, GitHubWebhookResponse, ReviewInput, ReviewResponse
 from .store import MemoryStore, MongoStore, Store
-from .worker import process_fixture_review
+from .worker import process_fixture_review, process_github_review
 from .workflow import run_review
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -33,7 +34,8 @@ def get_store(request: Request) -> Store:
 
 @app.get("/health")
 async def health(settings: Settings = Depends(get_settings)) -> dict[str, str | bool]:
-    return {"status": "ok", "environment": settings.app_env, "fixture_mode": settings.fixture_mode}
+    return {"status": "ok", "environment": settings.app_env, "fixture_mode": settings.fixture_mode,
+            "ai_provider": settings.ai_provider, "github_app_enabled": settings.github_app_enabled}
 
 
 @app.post("/api/reviews/fixture", response_model=ReviewResponse)
@@ -76,13 +78,19 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
     if bounty is None:
         return GitHubWebhookResponse(request_id=str(uuid4()), status="no_matching_bounty", delivery_id=delivery_id)
     pull_request = event.get("pull_request", {})
+    installation_id = event.get("installation", {}).get("id")
     commit_sha = pull_request.get("head", {}).get("sha")
     number = event.get("number")
     if not isinstance(commit_sha, str) or not isinstance(number, int):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed pull request payload")
     review_record, created = await store.create_review({"bounty_id": bounty["contract_bounty_id"], "repository": repository,
-        "pr_number": number, "commit_sha": commit_sha, "dedupe_key": f"{repository}:{number}:{commit_sha}", "status": "pending"})
-    if created and settings.fixture_mode:
+        "pr_number": number, "commit_sha": commit_sha, "dedupe_key": f"{repository}:{number}:{commit_sha}", "github_installation_id": installation_id, "status": "pending"})
+    if created and settings.github_app_enabled:
+        check_run_id = await GitHubAppClient(settings, installation_id).create_pending_check(repository, commit_sha)
+        await store.update_review(review_record["id"], {"github_check_run_id": check_run_id})
+        review_record["github_check_run_id"] = check_run_id
+        background_tasks.add_task(process_github_review, store, review_record["id"], review_record, bounty, settings)
+    elif created and settings.fixture_mode:
         review_input = ReviewInput(bounty_id=bounty["contract_bounty_id"], repository=repository, pull_request_number=number,
             commit_sha=commit_sha, title=pull_request.get("title", "Untitled"), body=pull_request.get("body"), diff="",
             changed_files=[], author=pull_request.get("user", {}).get("login", "unknown"), criteria=bounty["criteria"])

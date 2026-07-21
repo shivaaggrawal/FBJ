@@ -2,9 +2,10 @@ import asyncio
 import json
 
 from app.config import Settings
+from app.agents import redact_and_truncate
 from app.evidence import canonicalize, evidence_hash
 from app.schemas import ReviewInput
-from app.workflow import run_review
+from app.workflow import build_review_graph, run_review
 
 
 def sample_review(diff: str = "diff --git a/a.py b/a.py") -> ReviewInput:
@@ -24,7 +25,20 @@ def test_fixture_workflow_is_eligible():
     assert result.supervisor.eligible
 
 
+def test_langgraph_defines_parallel_agent_nodes():
+    graph = build_review_graph()
+    node_names = set(graph.get_graph().nodes)
+    assert {"validate_input", "run_quality", "run_security", "run_spam", "run_supervisor"} <= node_names
+
+
 def test_outlier_fixture_is_flagged():
     result = asyncio.run(run_review(sample_review("fixture:flag"), Settings()))
     assert result.status == "flagged"
     assert result.supervisor.flagged
+
+
+def test_redaction_and_truncation_keep_secrets_out_of_prompts():
+    result, truncated = redact_and_truncate("API_KEY=top-secret\nBearer abcdefghijklmnopqrstuvwxyz", 12)
+    assert "top-secret" not in result
+    assert "abcdefghijklmnopqrstuvwxyz" not in result
+    assert truncated
