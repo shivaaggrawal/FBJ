@@ -32,27 +32,12 @@ class Store:
     async def update_review(self, review_id: str, values: dict[str, Any]) -> None: ...
     async def get_review(self, review_id: str) -> dict[str, Any] | None: ...
     async def save_agent_results(
-    self,
-    review_id: str,
-    results: list[dict[str, Any]],
-) -> None: ...
-
-
-async def save_evidence(
-    self,
-    review_id: str,
-    evidence_bytes: bytes,
-    evidence_hash: str,
-    evidence_cid: str,
-) -> None:
-    ...
-
-
-async def get_evidence(
-    self,
-    review_id: str,
-) -> dict[str, Any] | None:
-    ...
+        self,
+        review_id: str,
+        results: list[dict[str, Any]],
+    ) -> None: ...
+    async def save_evidence(self, review_id: str, evidence_bytes: bytes, evidence_hash: str, evidence_cid: str) -> None: ...
+    async def get_evidence(self, review_id: str) -> dict[str, Any] | None: ...
 
 
 class MemoryStore(Store):
@@ -60,6 +45,8 @@ class MemoryStore(Store):
         self.deliveries: dict[str, dict[str, Any]] = {}
         self.bounties: dict[str, dict[str, Any]] = {}
         self.reviews: dict[str, dict[str, Any]] = {}
+        self.agent_results: dict[str, list[dict[str, Any]]] = {}
+        self.evidence: dict[str, dict[str, Any]] = {}
         self.dedupe_keys: set[str] = set()
 
     async def ensure_indexes(self) -> None:
@@ -112,10 +99,6 @@ class MemoryStore(Store):
     async def get_review(self, review_id: str) -> dict[str, Any] | None:
         review = self.reviews.get(review_id)
         return deepcopy(review) if review else None
-    
-
-
-
     async def save_agent_results(self, review_id: str, results: list[dict[str, Any]]) -> None:
         self.agent_results[review_id] = [{"review_id": review_id, **result, "created_at": utcnow()} for result in results]
 
@@ -131,6 +114,8 @@ class MemoryStore(Store):
     async def get_evidence(self, review_id: str) -> dict[str, Any] | None:
         evidence = self.evidence.get(review_id)
         return deepcopy(evidence) if evidence else None
+
+
 class MongoStore(Store):
     def __init__(self, uri: str, database: str) -> None:
         from motor.motor_asyncio import AsyncIOMotorClient
@@ -209,9 +194,10 @@ class MongoStore(Store):
 
     async def get_review(self, review_id: str) -> dict[str, Any] | None:
         return await self.db.reviews.find_one({"id": review_id}, {"_id": 0})
+
     async def save_agent_results(self, review_id: str, results: list[dict[str, Any]]) -> None:
-            if results:
-                await self.db.agent_results.insert_many([{"review_id": review_id, **result, "created_at": utcnow()} for result in results])
+        if results:
+            await self.db.agent_results.insert_many([{"review_id": review_id, **result, "created_at": utcnow()} for result in results])
 
     async def save_evidence(self, review_id: str, evidence_bytes: bytes, evidence_hash: str, evidence_cid: str) -> None:
         await self.db.evidence.replace_one(

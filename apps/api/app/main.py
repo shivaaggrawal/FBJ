@@ -10,6 +10,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Re
 from .attestation import AttestationError, attest_review, release_bounty
 from .chain import ChainClient, build_chain_client
 from .config import Settings, get_settings
+from .github import GitHubAppClient
 from .ipfs import FixtureIpfsClient, IpfsClient, build_ipfs_client
 from .schemas import (
     AttestationRequest,
@@ -165,7 +166,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed pull request payload")
     review_record, created = await store.create_review({"bounty_id": bounty["contract_bounty_id"], "repository": repository,
         "pr_number": number, "commit_sha": commit_sha, "dedupe_key": f"{repository}:{number}:{commit_sha}", "github_installation_id": installation_id, "status": "pending"})
-    if created and settings.github_app_enabled:
+    has_github_installation = installation_id is not None or settings.github_installation_id is not None
+    if created and settings.github_app_enabled and has_github_installation:
         check_run_id = await GitHubAppClient(settings, installation_id).create_pending_check(repository, commit_sha)
         await store.update_review(review_record["id"], {"github_check_run_id": check_run_id})
         review_record["github_check_run_id"] = check_run_id

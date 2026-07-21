@@ -28,6 +28,7 @@ class ReviewGraphState(TypedDict, total=False):
     spam: AgentResult
     supervisor: SupervisorResult
     evidence_hash: str
+    evidence_bytes: bytes
     input_truncated: bool
     errors: list[str]
 
@@ -65,7 +66,9 @@ async def validate_input(state: ReviewGraphState) -> dict:
 
 async def _run_agent(state: ReviewGraphState, agent: AgentName) -> AgentResult:
     settings = state["settings"]
-    agent_function = groq_agent if settings.ai_provider == "groq" else fixture_agent
+    # Fixture mode must remain fully offline, even if a developer's .env has
+    # a real provider selected for later deployment testing.
+    agent_function = groq_agent if not settings.fixture_mode and settings.ai_provider == "groq" else fixture_agent
     return await agent_function(agent, state["review"], settings)
 
 
@@ -85,15 +88,17 @@ async def supervisor_node(state: ReviewGraphState) -> dict:
     results = [state["quality"], state["security"], state["spam"]]
     supervisor = supervise(results)
     review = state["review"]
-async def run_review_artifact(review: ReviewInput, settings: Settings) -> ReviewArtifact:
-    results = await asyncio.gather(*(fixture_agent(agent, review, settings) for agent in AgentName))
-    supervisor = supervise(list(results))
     evidence = EvidenceBundle(bounty_id=review.bounty_id, repository=review.repository, pr_number=review.pull_request_number,
         commit_sha=review.commit_sha, evaluated_at=datetime.now(timezone.utc), final_score_bps=supervisor.final_score_bps,
         confidence_bps=round(sum(result.confidence_bps for result in results) / len(results)), agent_scores=[],
         reasoning="Independent LangGraph agent results were combined by the deterministic supervisor.", flagged=supervisor.flagged,
         flag_reasons=supervisor.flag_reasons, input_truncated=state["input_truncated"])
-    return {"supervisor": supervisor, "evidence_hash": evidence_hash(build_evidence(evidence, results))}
+    evidence_bytes = build_evidence(evidence, results)
+    return {
+        "supervisor": supervisor,
+        "evidence_bytes": evidence_bytes,
+        "evidence_hash": evidence_hash(evidence_bytes),
+    }
 
 
 def build_review_graph():
@@ -112,18 +117,23 @@ def build_review_graph():
     return graph.compile()
 
 
-async def run_review(review: ReviewInput, settings: Settings) -> ReviewResponse:
+async def run_review_artifact(review: ReviewInput, settings: Settings) -> ReviewArtifact:
     final_state = await build_review_graph().ainvoke({"review": review, "settings": settings, "errors": []})
     results = [final_state["quality"], final_state["security"], final_state["spam"]]
     supervisor = final_state["supervisor"]
-    return ReviewResponse(request_id=str(uuid4()), review_id=str(uuid4()), status="flagged" if supervisor.flagged else "completed", supervisor=supervisor, evidence_hash=final_state["evidence_hash"], agent_results=results)
-        confidence_bps=round(sum(r.confidence_bps for r in results) / len(results)), agent_scores=[],
-        reasoning="Deterministic fixture workflow; no external AI provider was called.", flagged=supervisor.flagged,
-        flag_reasons=supervisor.flag_reasons)
-    evidence_bytes = build_evidence(evidence, list(results))
-    digest = evidence_hash(evidence_bytes)
-    response = ReviewResponse(request_id=str(uuid4()), review_id=str(uuid4()), status="flagged" if supervisor.flagged else "completed", supervisor=supervisor, evidence_hash=digest)
-    return ReviewArtifact(response=response, evidence_bytes=evidence_bytes, agent_results=list(results))
+    response = ReviewResponse(
+        request_id=str(uuid4()),
+        review_id=str(uuid4()),
+        status="flagged" if supervisor.flagged else "completed",
+        supervisor=supervisor,
+        evidence_hash=final_state["evidence_hash"],
+        agent_results=results,
+    )
+    return ReviewArtifact(
+        response=response,
+        evidence_bytes=final_state["evidence_bytes"],
+        agent_results=results,
+    )
 
 
 async def run_review(review: ReviewInput, settings: Settings) -> ReviewResponse:
