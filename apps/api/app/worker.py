@@ -2,21 +2,64 @@
 import logging
 
 from .config import Settings
+from .evidence import evidence_hash
+from .ipfs import IpfsClient
 from .github import GitHubAppClient
 from .schemas import ReviewInput
 from .store import Store
-from .workflow import run_review
+from .workflow import run_review_artifact
 
 logger = logging.getLogger(__name__)
 
 
-async def process_fixture_review(store: Store, review_id: str, review_input: ReviewInput, settings: Settings) -> None:
+async def process_fixture_review(store: Store, ipfs: IpfsClient, review_id: str, review_input: ReviewInput, settings: Settings):
     try:
-        result = await run_review(review_input, settings)
-        await store.save_agent_results(review_id, [item.model_dump(mode="json") for item in result.agent_results])
-        await store.update_review(review_id, {"status": result.status, "final_score_bps": result.supervisor.final_score_bps,
-            "eligible": result.supervisor.eligible, "flagged": result.supervisor.flagged,
-            "flag_reasons": result.supervisor.flag_reasons, "evidence_hash": result.evidence_hash})
+        artifact = await run_review_artifact(review_input, settings)
+        result = artifact.response
+
+        calculated_hash = evidence_hash(artifact.evidence_bytes)
+        if calculated_hash != result.evidence_hash:
+            raise RuntimeError("Evidence hash mismatch before persistence")
+
+        evidence_cid = await ipfs.pin_bytes(artifact.evidence_bytes)
+
+        await store.save_evidence(
+            review_id,
+            artifact.evidence_bytes,
+            calculated_hash,
+            evidence_cid,
+        )
+
+        await store.save_agent_results(
+            review_id,
+            [agent.model_dump(mode="json") for agent in artifact.agent_results],
+        )
+
+        await store.update_review(review_id, {
+            "status": result.status,
+            "final_score_bps": result.supervisor.final_score_bps,
+            "eligible": result.supervisor.eligible,
+            "flagged": result.supervisor.flagged,
+            "flag_reasons": result.supervisor.flag_reasons,
+            "evidence_hash": calculated_hash,
+            "evidence_cid": evidence_cid,
+            "attestation_status": (
+                "pending"
+                if result.supervisor.eligible
+                else "not_eligible"
+            ),
+        })
+
+        return result.model_copy(update={
+            "review_id": review_id,
+            "evidence_cid": evidence_cid,
+            "attestation_status": (
+                "pending"
+                if result.supervisor.eligible
+                else "not_eligible"
+            ),
+            "agent_results": artifact.agent_results,
+        })
     except Exception:
         logger.exception("review worker failed", extra={"review_id": review_id})
         await store.update_review(review_id, {"status": "failed"})
@@ -34,3 +77,4 @@ async def process_github_review(store: Store, review_id: str, review_record: dic
     except Exception:
         logger.exception("GitHub review worker failed", extra={"review_id": review_id})
         await store.update_review(review_id, {"status": "failed"})
+        raise

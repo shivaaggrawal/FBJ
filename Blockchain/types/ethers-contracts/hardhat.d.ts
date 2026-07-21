@@ -13,32 +13,32 @@ declare module "@nomicfoundation/hardhat-ethers/types" {
   getContractFactory(name: 'BountyEscrow', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.BountyEscrow__factory>
 getContractFactory(name: 'DisputeManager', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.DisputeManager__factory>
 getContractFactory(name: 'VerdictRegistry', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.VerdictRegistry__factory>
-getContractFactory(name: 'IVerdictRegistry', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.IVerdictRegistry__factory>
 getContractFactory(name: 'IBountyEscrow', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.IBountyEscrow__factory>
+getContractFactory(name: 'IVerdictRegistry', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.IVerdictRegistry__factory>
 getContractFactory(name: 'FeeOnTransferToken', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.FeeOnTransferToken__factory>
 getContractFactory(name: 'MockUSDC', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.MockUSDC__factory>
 
   getContractAt(name: 'BountyEscrow', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.BountyEscrow>
 getContractAt(name: 'DisputeManager', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.DisputeManager>
 getContractAt(name: 'VerdictRegistry', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.VerdictRegistry>
-getContractAt(name: 'IVerdictRegistry', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.IVerdictRegistry>
 getContractAt(name: 'IBountyEscrow', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.IBountyEscrow>
+getContractAt(name: 'IVerdictRegistry', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.IVerdictRegistry>
 getContractAt(name: 'FeeOnTransferToken', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.FeeOnTransferToken>
 getContractAt(name: 'MockUSDC', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.MockUSDC>
 
   deployContract(name: 'BountyEscrow', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.BountyEscrow>
 deployContract(name: 'DisputeManager', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.DisputeManager>
 deployContract(name: 'VerdictRegistry', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.VerdictRegistry>
-deployContract(name: 'IVerdictRegistry', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IVerdictRegistry>
 deployContract(name: 'IBountyEscrow', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IBountyEscrow>
+deployContract(name: 'IVerdictRegistry', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IVerdictRegistry>
 deployContract(name: 'FeeOnTransferToken', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.FeeOnTransferToken>
 deployContract(name: 'MockUSDC', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.MockUSDC>
 
   deployContract(name: 'BountyEscrow', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.BountyEscrow>
 deployContract(name: 'DisputeManager', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.DisputeManager>
 deployContract(name: 'VerdictRegistry', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.VerdictRegistry>
-deployContract(name: 'IVerdictRegistry', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IVerdictRegistry>
 deployContract(name: 'IBountyEscrow', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IBountyEscrow>
+deployContract(name: 'IVerdictRegistry', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IVerdictRegistry>
 deployContract(name: 'FeeOnTransferToken', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.FeeOnTransferToken>
 deployContract(name: 'MockUSDC', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.MockUSDC>
 

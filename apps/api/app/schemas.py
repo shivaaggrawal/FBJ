@@ -19,13 +19,38 @@ class Severity(str, Enum):
 
 
 class ChangedFile(BaseModel):
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{
+            "path": "src/index.ts",
+            "additions": 24,
+            "deletions": 3,
+        }],
+    })
+
     path: str
     additions: int = Field(ge=0)
     deletions: int = Field(ge=0)
 
 
 class ReviewInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True, json_schema_extra={
+        "examples": [{
+            "bounty_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "repository": "owner/demo-repository",
+            "pull_request_number": 7,
+            "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "title": "Fix payout calculation",
+            "body": "Implements the acceptance criteria for the bounty.",
+            "diff": "diff --git a/src/index.ts b/src/index.ts\n+export const fixed = true;",
+            "changed_files": [{
+                "path": "src/index.ts",
+                "additions": 24,
+                "deletions": 3,
+            }],
+            "author": "contributor",
+            "criteria": "Solution must pass tests and avoid security regressions.",
+        }],
+    })
     bounty_id: str = Field(min_length=1)
     repository: str = Field(pattern=r"^[^/\s]+/[^/\s]+$")
     pull_request_number: int = Field(gt=0)
@@ -96,16 +121,32 @@ class ReviewResponse(BaseModel):
     status: str
     supervisor: SupervisorResult
     evidence_hash: str
+    evidence_cid: str | None = None
+    attestation_status: str | None = None
     agent_results: list[AgentResult] = Field(default_factory=list)
 
 
 class BountyCreateRequest(BaseModel):
-    contract_bounty_id: str = Field(min_length=1)
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{
+            "contract_bounty_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "repository": "owner/demo-repository",
+            "issue_url": "https://github.com/owner/demo-repository/issues/1",
+            "criteria": "Fix the issue, include tests, and do not introduce security regressions.",
+            "reward_token": "0x0000000000000000000000000000000000000000",
+            "reward_amount": "1000000",
+            "maintainer_wallet": "0x1111111111111111111111111111111111111111",
+            "recipient_wallet": "0x2222222222222222222222222222222222222222",
+            "challenge_seconds": 86400,
+        }],
+    })
+
+    contract_bounty_id: str = Field(pattern=r"^0x[0-9a-fA-F]{64}$")
     repository: str = Field(pattern=r"^[^/\s]+/[^/\s]+$")
     issue_url: str = Field(min_length=1)
     criteria: str = ""
     reward_token: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
-    reward_amount: str = Field(pattern=r"^[0-9]+$")
+    reward_amount: str = Field(pattern=r"^[1-9][0-9]*$")
     maintainer_wallet: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
     recipient_wallet: str | None = Field(default=None, pattern=r"^0x[0-9a-fA-F]{40}$")
     challenge_seconds: int = Field(gt=0)
@@ -120,3 +161,19 @@ class GitHubWebhookResponse(BaseModel):
     request_id: str
     status: str
     delivery_id: str
+
+
+class AttestationRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{
+            "recipient_wallet": "0x2222222222222222222222222222222222222222",
+        }],
+    })
+
+    recipient_wallet: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
+
+
+class TransactionResponse(BaseModel):
+    transaction_hash: str
+    network: str
+    status: str

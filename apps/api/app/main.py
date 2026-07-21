@@ -5,14 +5,23 @@ import logging
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response, status
 
+from .attestation import AttestationError, attest_review, release_bounty
+from .chain import ChainClient, build_chain_client
 from .config import Settings, get_settings
-from .github import GitHubAppClient
-from .schemas import BountyCreateRequest, BountyResponse, GitHubWebhookResponse, ReviewInput, ReviewResponse
-from .store import MemoryStore, MongoStore, Store
+from .ipfs import FixtureIpfsClient, IpfsClient, build_ipfs_client
+from .schemas import (
+    AttestationRequest,
+    BountyCreateRequest,
+    BountyResponse,
+    GitHubWebhookResponse,
+    ReviewInput,
+    ReviewResponse,
+    TransactionResponse,
+)
+from .store import DuplicateBounty, MemoryStore, MongoStore, Store
 from .worker import process_fixture_review, process_github_review
-from .workflow import run_review
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -20,16 +29,28 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 async def lifespan(application: FastAPI):
     settings = get_settings()
     application.state.store = MemoryStore() if settings.database_mode == "memory" else MongoStore(settings.mongodb_uri, settings.mongodb_database)
+    application.state.ipfs = build_ipfs_client(settings)
+    application.state.chain = build_chain_client(settings)
     await application.state.store.ensure_indexes()
     yield
 
 
 app = FastAPI(title="Fair Bounty Judge API", version="0.1.0", lifespan=lifespan)
 app.state.store = MemoryStore()  # Supports local tooling that does not trigger ASGI lifespan.
+app.state.ipfs = FixtureIpfsClient()
+app.state.chain = build_chain_client(get_settings())
 
 
 def get_store(request: Request) -> Store:
     return request.app.state.store
+
+
+def get_ipfs(request: Request) -> IpfsClient:
+    return request.app.state.ipfs
+
+
+def get_chain(request: Request) -> ChainClient:
+    return request.app.state.chain
 
 
 @app.get("/health")
@@ -39,15 +60,74 @@ async def health(settings: Settings = Depends(get_settings)) -> dict[str, str | 
 
 
 @app.post("/api/reviews/fixture", response_model=ReviewResponse)
-async def review_fixture(review: ReviewInput, settings: Settings = Depends(get_settings)) -> ReviewResponse:
+async def review_fixture(review: ReviewInput, store: Store = Depends(get_store), ipfs: IpfsClient = Depends(get_ipfs), settings: Settings = Depends(get_settings)) -> ReviewResponse:
     if not settings.fixture_mode:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fixture mode is disabled")
-    return await run_review(review, settings)
+    record, _ = await store.create_review({
+        "bounty_id": review.bounty_id,
+        "repository": review.repository,
+        "pr_number": review.pull_request_number,
+        "commit_sha": review.commit_sha,
+        "dedupe_key": f"fixture:{uuid4()}",
+        "status": "pending",
+    })
+    return await process_fixture_review(store, ipfs, record["id"], review, settings)
 
 
 @app.post("/api/bounties", response_model=BountyResponse, status_code=status.HTTP_201_CREATED)
 async def create_bounty(bounty: BountyCreateRequest, store: Store = Depends(get_store)) -> dict:
-    return await store.create_bounty(bounty.model_dump() | {"status": "open"})
+    try:
+        return await store.create_bounty(bounty.model_dump() | {"status": "open"})
+    except DuplicateBounty as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bounty is already registered") from exc
+
+
+@app.get("/api/bounties", response_model=list[BountyResponse])
+async def list_bounties(store: Store = Depends(get_store)) -> list[dict]:
+    return await store.list_bounties()
+
+
+@app.get("/api/bounties/{contract_bounty_id}", response_model=BountyResponse)
+async def get_bounty(contract_bounty_id: str, store: Store = Depends(get_store)) -> dict:
+    bounty = await store.get_bounty(contract_bounty_id)
+    if bounty is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bounty was not found")
+    return bounty
+
+
+@app.get("/api/reviews/{review_id}")
+async def get_review(review_id: str, store: Store = Depends(get_store)) -> dict:
+    review = await store.get_review(review_id)
+    if review is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review was not found")
+    return review
+
+
+@app.get("/api/reviews/{review_id}/evidence")
+async def get_review_evidence(review_id: str, store: Store = Depends(get_store)) -> Response:
+    evidence = await store.get_evidence(review_id)
+    if evidence is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review evidence was not found")
+    return Response(content=evidence["evidence_bytes"], media_type="application/json", headers={
+        "X-Evidence-Hash": evidence["evidence_hash"],
+        "X-Evidence-Cid": evidence["evidence_cid"],
+    })
+
+
+@app.post("/api/reviews/{review_id}/attest", response_model=TransactionResponse, status_code=status.HTTP_202_ACCEPTED)
+async def attest_review_endpoint(review_id: str, payload: AttestationRequest, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)) -> dict:
+    try:
+        return await attest_review(store, chain, review_id, payload.recipient_wallet)
+    except AttestationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/api/bounties/{contract_bounty_id}/release", response_model=TransactionResponse, status_code=status.HTTP_202_ACCEPTED)
+async def release_bounty_endpoint(contract_bounty_id: str, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)) -> dict:
+    try:
+        return await release_bounty(store, chain, contract_bounty_id)
+    except AttestationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 def _verified_signature(payload: bytes, signature: str | None, secret: str) -> bool:
@@ -94,5 +174,5 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
         review_input = ReviewInput(bounty_id=bounty["contract_bounty_id"], repository=repository, pull_request_number=number,
             commit_sha=commit_sha, title=pull_request.get("title", "Untitled"), body=pull_request.get("body"), diff="",
             changed_files=[], author=pull_request.get("user", {}).get("login", "unknown"), criteria=bounty["criteria"])
-        background_tasks.add_task(process_fixture_review, store, review_record["id"], review_input, settings)
+        background_tasks.add_task(process_fixture_review, store, request.app.state.ipfs, review_record["id"], review_input, settings)
     return GitHubWebhookResponse(request_id=str(uuid4()), status="accepted" if created else "duplicate_review", delivery_id=delivery_id)

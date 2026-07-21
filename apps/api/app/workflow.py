@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TypedDict
 from uuid import uuid4
@@ -9,6 +10,13 @@ from .agents import groq_agent, redact_and_truncate
 from .config import Settings
 from .evidence import build_evidence, evidence_hash
 from .schemas import AgentName, AgentResult, EvidenceBundle, ReviewInput, ReviewResponse, SupervisorResult
+
+
+@dataclass(frozen=True)
+class ReviewArtifact:
+    response: ReviewResponse
+    evidence_bytes: bytes
+    agent_results: list[AgentResult]
 
 
 class ReviewGraphState(TypedDict, total=False):
@@ -77,6 +85,9 @@ async def supervisor_node(state: ReviewGraphState) -> dict:
     results = [state["quality"], state["security"], state["spam"]]
     supervisor = supervise(results)
     review = state["review"]
+async def run_review_artifact(review: ReviewInput, settings: Settings) -> ReviewArtifact:
+    results = await asyncio.gather(*(fixture_agent(agent, review, settings) for agent in AgentName))
+    supervisor = supervise(list(results))
     evidence = EvidenceBundle(bounty_id=review.bounty_id, repository=review.repository, pr_number=review.pull_request_number,
         commit_sha=review.commit_sha, evaluated_at=datetime.now(timezone.utc), final_score_bps=supervisor.final_score_bps,
         confidence_bps=round(sum(result.confidence_bps for result in results) / len(results)), agent_scores=[],
@@ -106,3 +117,14 @@ async def run_review(review: ReviewInput, settings: Settings) -> ReviewResponse:
     results = [final_state["quality"], final_state["security"], final_state["spam"]]
     supervisor = final_state["supervisor"]
     return ReviewResponse(request_id=str(uuid4()), review_id=str(uuid4()), status="flagged" if supervisor.flagged else "completed", supervisor=supervisor, evidence_hash=final_state["evidence_hash"], agent_results=results)
+        confidence_bps=round(sum(r.confidence_bps for r in results) / len(results)), agent_scores=[],
+        reasoning="Deterministic fixture workflow; no external AI provider was called.", flagged=supervisor.flagged,
+        flag_reasons=supervisor.flag_reasons)
+    evidence_bytes = build_evidence(evidence, list(results))
+    digest = evidence_hash(evidence_bytes)
+    response = ReviewResponse(request_id=str(uuid4()), review_id=str(uuid4()), status="flagged" if supervisor.flagged else "completed", supervisor=supervisor, evidence_hash=digest)
+    return ReviewArtifact(response=response, evidence_bytes=evidence_bytes, agent_results=list(results))
+
+
+async def run_review(review: ReviewInput, settings: Settings) -> ReviewResponse:
+    return (await run_review_artifact(review, settings)).response
