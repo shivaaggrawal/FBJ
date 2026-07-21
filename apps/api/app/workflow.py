@@ -127,6 +127,7 @@ async def run_review_artifact(review: ReviewInput, settings: Settings) -> Review
         status="flagged" if supervisor.flagged else "completed",
         supervisor=supervisor,
         evidence_hash=final_state["evidence_hash"],
+        commit_sha=review.commit_sha,
         agent_results=results,
     )
     return ReviewArtifact(

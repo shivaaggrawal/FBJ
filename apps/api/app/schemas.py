@@ -121,8 +121,10 @@ class ReviewResponse(BaseModel):
     status: str
     supervisor: SupervisorResult
     evidence_hash: str
+    commit_sha: str | None = None
     evidence_cid: str | None = None
     attestation_status: str | None = None
+    attestation_tx_hash: str | None = None
     agent_results: list[AgentResult] = Field(default_factory=list)
 
 

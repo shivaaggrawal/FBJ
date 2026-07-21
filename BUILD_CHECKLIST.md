@@ -89,11 +89,11 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 - [x] Canonicalize bytes deterministically: UTF-8, sorted keys, stable array ordering, no pretty-print whitespace.
 - [x] Calculate `keccak256` over the exact byte sequence uploaded to IPFS.
 - [x] Upload/pin those exact bytes and store the returned CID.
-- [ ] Verify retrieved IPFS content hashes to the same `evidenceHash` before calling the relayer.
+- [x] Verify retrieved IPFS content hashes to the same `evidenceHash` before calling the relayer.
 - [x] Convert the final score to the contract’s `uint16` basis-point format.
 - [x] Send the `submitVerdict` transaction from the relayer service and store its transaction hash.
-- [ ] Include CID, verdict hash, commit SHA, score, transaction link, and eligibility in the GitHub summary.
-- [ ] Test a deliberate evidence-byte mutation and confirm verification fails before attestation.
+- [x] Include CID, verdict hash, commit SHA, score, transaction link, and eligibility in the GitHub summary.
+- [x] Test a deliberate evidence-byte mutation and confirm verification fails before attestation.
 
 ## 7. Dashboard
 

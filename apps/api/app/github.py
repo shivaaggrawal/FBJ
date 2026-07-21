@@ -58,5 +58,30 @@ class GitHubAppClient:
     async def complete_check(self, repository: str, check_run_id: int, result: ReviewResponse) -> None:
         findings = [f"- **{agent.agent.value.title()}**: {agent.score_bps / 100:.0f}% — {agent.summary}" for agent in result.agent_results]
         conclusion = "success" if result.supervisor.eligible else "neutral"
-        summary = "\n".join([f"Final score: **{result.supervisor.final_score_bps / 100:.0f}%**", f"Eligible: **{'Yes' if result.supervisor.eligible else 'No'}**", *findings, f"Evidence hash: `{result.evidence_hash}`"])
+        evidence_details = [f"Evidence hash: `{result.evidence_hash}`"]
+        if result.commit_sha:
+            evidence_details.append(f"Commit SHA: `{result.commit_sha}`")
+        if result.evidence_cid:
+            evidence_details.append(
+                f"Evidence CID: [{result.evidence_cid}]({self.settings.ipfs_gateway_url.rstrip('/')}/{result.evidence_cid})"
+            )
+        if result.attestation_status:
+            evidence_details.append(f"Attestation: **{result.attestation_status.replace('_', ' ')}**")
+        if result.attestation_tx_hash:
+            transaction_url = (
+                f"https://amoy.polygonscan.com/tx/{result.attestation_tx_hash}"
+                if self.settings.chain_id == 80002
+                else None
+            )
+            evidence_details.append(
+                f"Attestation transaction: [{result.attestation_tx_hash}]({transaction_url})"
+                if transaction_url
+                else f"Attestation transaction: `{result.attestation_tx_hash}`"
+            )
+        summary = "\n".join([
+            f"Final score: **{result.supervisor.final_score_bps / 100:.0f}%**",
+            f"Eligible: **{'Yes' if result.supervisor.eligible else 'No'}**",
+            *findings,
+            *evidence_details,
+        ])
         await self._request("PATCH", f"/repos/{repository}/check-runs/{check_run_id}", json={"status": "completed", "conclusion": conclusion, "output": {"title": "Fair Bounty Judge verdict", "summary": summary}})

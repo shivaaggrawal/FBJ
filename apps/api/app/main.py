@@ -171,7 +171,16 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
         check_run_id = await GitHubAppClient(settings, installation_id).create_pending_check(repository, commit_sha)
         await store.update_review(review_record["id"], {"github_check_run_id": check_run_id})
         review_record["github_check_run_id"] = check_run_id
-        background_tasks.add_task(process_github_review, store, review_record["id"], review_record, bounty, settings)
+        background_tasks.add_task(
+            process_github_review,
+            store,
+            request.app.state.ipfs,
+            request.app.state.chain,
+            review_record["id"],
+            review_record,
+            bounty,
+            settings,
+        )
     elif created and settings.fixture_mode:
         review_input = ReviewInput(bounty_id=bounty["contract_bounty_id"], repository=repository, pull_request_number=number,
             commit_sha=commit_sha, title=pull_request.get("title", "Untitled"), body=pull_request.get("body"), diff="",
