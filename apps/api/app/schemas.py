@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -178,14 +179,20 @@ class GitHubWebhookResponse(BaseModel):
     delivery_id: str
 
 
-class AttestationRequest(BaseModel):
-    model_config = ConfigDict(json_schema_extra={
-        "examples": [{
-            "recipient_wallet": "0x2222222222222222222222222222222222222222",
-        }],
-    })
+class DisputeEvidenceRequest(BaseModel):
+    evidence: dict[str, Any] = Field(min_length=1)
 
-    recipient_wallet: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
+
+class DisputeResolutionRequest(BaseModel):
+    resolution: int = Field(ge=1, le=2, description="1 pays the recipient; 2 refunds the maintainer.")
+
+
+class WalletTransactionResponse(BaseModel):
+    operation: str
+    transaction: dict[str, Any]
+    evidence_cid: str | None = None
+    evidence_hash: str | None = None
+    dispute_status: str | None = None
 
 
 class TransactionResponse(BaseModel):

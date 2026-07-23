@@ -84,10 +84,9 @@ async def process_github_review(
         review_input = await client.fetch_review_input(bounty["contract_bounty_id"], review_record["repository"], review_record["pr_number"], bounty["criteria"])
         result = await persist_review_artifact(store, ipfs, review_id, review_input, settings)
 
-        recipient_wallet = bounty.get("recipient_wallet")
-        if result.supervisor.eligible and recipient_wallet:
+        if result.supervisor.eligible and bounty.get("recipient_wallet"):
             try:
-                transaction = await attest_review(store, chain, review_id, recipient_wallet)
+                transaction = await attest_review(store, chain, ipfs, review_id)
                 result = result.model_copy(update={
                     "attestation_status": "confirmed",
                     "attestation_tx_hash": transaction["transaction_hash"],

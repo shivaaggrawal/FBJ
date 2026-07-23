@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fair Bounty Judge</title>
+    <link rel="stylesheet" href="/app/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/app/" aria-label="Fair Bounty Judge dashboard"><span>FBJ</span> Fair Bounty Judge</a>
+      <div class="topbar-actions">
+        <span id="network-status" class="network-status">API connected</span>
+        <button id="connect-wallet" class="primary" type="button">Connect wallet</button>
+      </div>
+    </header>
+    <main class="shell">
+      <aside class="sidebar">
+        <button class="nav-link active" type="button" data-view="bounties">Bounties</button>
+        <button class="nav-link" type="button" data-view="disputes">Disputes</button>
+        <div class="sidebar-note"><span class="dot"></span> Polygon Amoy</div>
+      </aside>
+      <section class="workspace">
+        <div id="notice" class="notice" aria-live="polite"></div>
+        <section id="bounties-view" class="view active">
+          <div class="page-heading">
+            <div><h1>Bounties</h1><p>On-chain work rewards and review evidence.</p></div>
+            <button id="refresh-bounties" class="icon-button" type="button" title="Refresh bounties">Refresh</button>
+          </div>
+          <div class="bounty-layout">
+            <form id="create-bounty-form" class="tool-panel">
+              <div class="panel-heading"><h2>Create bounty</h2><span class="status-pill">Wallet required</span></div>
+              <label>Repository<input name="repository" required placeholder="owner/repository"></label>
+              <label>Issue URL<input name="issue_url" type="url" required placeholder="https://github.com/owner/repo/issues/1"></label>
+              <label>Acceptance criteria<textarea name="criteria" rows="3" placeholder="What must the contribution achieve?"></textarea></label>
+              <div class="field-row token-row">
+                <label>Token<input name="reward_token" required value="0x0000000000000000000000000000000000000000"></label>
+                <label>Amount<input name="reward_amount" required inputmode="numeric" value="1000000"></label>
+              </div>
+              <div class="field-row">
+                <label>Expiry<input name="expires_at" required type="datetime-local"></label>
+                <label>Recipient wallet<input name="recipient_wallet" placeholder="Optional contributor wallet"></label>
+              </div>
+              <button class="primary full" type="submit">Approve and create</button>
+            </form>
+            <section class="list-panel">
+              <div class="panel-heading"><h2>Active bounties</h2><span id="bounty-count" class="muted">0</span></div>
+              <div id="bounty-list" class="bounty-list"><p class="empty">Loading bounties...</p></div>
+            </section>
+          </div>
+          <section id="bounty-detail" class="detail-panel hidden">
+            <div class="panel-heading"><div><h2 id="detail-title">Bounty detail</h2><p id="detail-repository" class="muted"></p></div><span id="detail-status" class="status-pill"></span></div>
+            <div id="detail-facts" class="facts"></div>
+            <div id="review-detail" class="review-detail"><p class="empty">Select a bounty to inspect its chain state and review.</p></div>
+            <div class="action-grid">
+              <button id="release-bounty" type="button">Release payout</button>
+              <button id="cancel-bounty" type="button">Cancel open bounty</button>
+              <button id="refund-bounty" type="button">Refund expired bounty</button>
+            </div>
+            <form id="open-dispute-form" class="inline-form">
+              <label>Dispute evidence JSON<textarea name="evidence" rows="3" required placeholder='{"reason":"..."}'></textarea></label>
+              <button type="submit">Prepare dispute</button>
+            </form>
+            <div class="resolver-row">
+              <span>Resolver action</span>
+              <button type="button" data-resolution="1">Pay recipient</button>
+              <button type="button" data-resolution="2">Refund maintainer</button>
+            </div>
+          </section>
+        </section>
+        <section id="disputes-view" class="view">
+          <div class="page-heading"><div><h1>Disputes</h1><p>Evidence prepared for challenge and resolver review.</p></div><button id="refresh-disputes" class="icon-button" type="button" title="Refresh disputes">Refresh</button></div>
+          <div id="dispute-list" class="dispute-list"><p class="empty">Loading disputes...</p></div>
+        </section>
+      </section>
+    </main>
+    <script src="/app/app.js"></script>
+  </body>
+</html>
