@@ -12,7 +12,8 @@ export default defineConfig({
       default: {
         version: "0.8.28",
         settings: {
-          optimizer: { enabled: true, runs: 200 },
+          // Deployment cost matters more than repeated on-chain execution for this MVP.
+          optimizer: { enabled: true, runs: 1 },
           evmVersion: "paris"
         }
       }

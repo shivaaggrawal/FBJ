@@ -2,26 +2,40 @@ import hashlib
 import hmac
 import json
 import logging
+import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi.staticfiles import StaticFiles
 
 from .attestation import AttestationError, attest_review, release_bounty
 from .bounties import BountyRegistrationError, registration_message, verify_on_chain_bounty
 from .chain import ChainClient, build_chain_client
 from .config import Settings, get_settings
+from .disputes import (
+    DisputeError,
+    prepare_cancel_open_bounty,
+    prepare_dispute_resolution,
+    prepare_open_dispute,
+    prepare_refund_expired_bounty,
+)
+from .event_indexer import monitor_chain_events
 from .github import GitHubAppClient
 from .ipfs import FixtureIpfsClient, IpfsClient, build_ipfs_client
 from .schemas import (
-    AttestationRequest,
+    BountyCreateRequest,
     BountyRegistrationMessageResponse,
     BountyRegistrationRequest,
     BountyResponse,
+    DisputeEvidenceRequest,
+    DisputeResolutionRequest,
     GitHubWebhookResponse,
     ReviewInput,
     ReviewResponse,
     TransactionResponse,
+    WalletTransactionResponse,
 )
 from .store import DuplicateBounty, MemoryStore, MongoStore, Store
 from .worker import process_fixture_review, process_github_review
@@ -35,7 +49,16 @@ async def lifespan(application: FastAPI):
     application.state.ipfs = build_ipfs_client(settings)
     application.state.chain = build_chain_client(settings)
     await application.state.store.ensure_indexes()
-    yield
+    stop_events = asyncio.Event()
+    monitor_task = None
+    if not settings.fixture_mode:
+        monitor_task = asyncio.create_task(monitor_chain_events(application.state.store, application.state.chain, settings, stop_events))
+    try:
+        yield
+    finally:
+        stop_events.set()
+        if monitor_task is not None:
+            await monitor_task
 
 
 app = FastAPI(title="Fair Bounty Judge API", version="0.1.0", lifespan=lifespan)
@@ -87,6 +110,19 @@ async def bounty_registration_message(bounty: BountyRegistrationRequest, setting
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
+@app.post("/api/bounties/prepare", response_model=WalletTransactionResponse)
+async def prepare_bounty_creation(
+    bounty: BountyCreateRequest, chain: ChainClient = Depends(get_chain)
+) -> dict:
+    try:
+        transaction = await chain.prepare_bounty_creation(
+            bounty.contract_bounty_id, bounty.reward_token, int(bounty.reward_amount), bounty.expires_at
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return {"operation": "create_bounty", "transaction": transaction}
+
+
 @app.post("/api/bounties", response_model=BountyResponse, status_code=status.HTTP_201_CREATED)
 async def create_bounty(
     bounty: BountyRegistrationRequest,
@@ -119,6 +155,81 @@ async def get_bounty(contract_bounty_id: str, store: Store = Depends(get_store))
     return bounty
 
 
+@app.get("/api/bounties/{contract_bounty_id}/chain-state")
+async def get_bounty_chain_state(contract_bounty_id: str, chain: ChainClient = Depends(get_chain)) -> dict:
+    try:
+        return {
+            "bounty": await chain.get_bounty(contract_bounty_id),
+            "verdict": await chain.get_verdict(contract_bounty_id),
+            "dispute": await chain.get_dispute(contract_bounty_id),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.get("/api/disputes")
+async def list_disputes(store: Store = Depends(get_store)) -> list[dict]:
+    return await store.list_disputes()
+
+
+@app.get("/api/bounties/{contract_bounty_id}/dispute")
+async def get_dispute(contract_bounty_id: str, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)) -> dict:
+    try:
+        return {"local": await store.get_dispute(contract_bounty_id), "chain": await chain.get_dispute(contract_bounty_id)}
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/api/bounties/{contract_bounty_id}/disputes/prepare", response_model=WalletTransactionResponse)
+async def prepare_bounty_dispute(
+    contract_bounty_id: str,
+    payload: DisputeEvidenceRequest,
+    store: Store = Depends(get_store),
+    chain: ChainClient = Depends(get_chain),
+    ipfs: IpfsClient = Depends(get_ipfs),
+) -> dict:
+    try:
+        result = await prepare_open_dispute(store, chain, ipfs, contract_bounty_id, payload.evidence)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return {
+        "operation": "open_dispute",
+        "transaction": result["transaction"],
+        "evidence_cid": result["evidence_cid"],
+        "evidence_hash": result["evidence_hash"],
+        "dispute_status": "transaction_prepared",
+    }
+
+
+@app.post("/api/bounties/{contract_bounty_id}/disputes/resolve/prepare", response_model=WalletTransactionResponse)
+async def prepare_bounty_dispute_resolution(
+    contract_bounty_id: str, payload: DisputeResolutionRequest, chain: ChainClient = Depends(get_chain)
+) -> dict:
+    try:
+        transaction = await prepare_dispute_resolution(chain, contract_bounty_id, payload.resolution)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return {"operation": "resolve_dispute", "transaction": transaction}
+
+
+@app.post("/api/bounties/{contract_bounty_id}/cancel/prepare", response_model=WalletTransactionResponse)
+async def prepare_bounty_cancellation(contract_bounty_id: str, chain: ChainClient = Depends(get_chain)) -> dict:
+    try:
+        transaction = await prepare_cancel_open_bounty(chain, contract_bounty_id)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return {"operation": "cancel_open_bounty", "transaction": transaction}
+
+
+@app.post("/api/bounties/{contract_bounty_id}/refund/prepare", response_model=WalletTransactionResponse)
+async def prepare_expired_bounty_refund(contract_bounty_id: str, chain: ChainClient = Depends(get_chain)) -> dict:
+    try:
+        transaction = await prepare_refund_expired_bounty(chain, contract_bounty_id)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return {"operation": "refund_expired_bounty", "transaction": transaction}
+
+
 @app.get("/api/reviews/{review_id}")
 async def get_review(review_id: str, store: Store = Depends(get_store)) -> dict:
     review = await store.get_review(review_id)
@@ -139,9 +250,9 @@ async def get_review_evidence(review_id: str, store: Store = Depends(get_store))
 
 
 @app.post("/api/reviews/{review_id}/attest", response_model=TransactionResponse, status_code=status.HTTP_202_ACCEPTED)
-async def attest_review_endpoint(review_id: str, payload: AttestationRequest, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)) -> dict:
+async def attest_review_endpoint(review_id: str, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain), ipfs: IpfsClient = Depends(get_ipfs)) -> dict:
     try:
-        return await attest_review(store, chain, review_id, payload.recipient_wallet)
+        return await attest_review(store, chain, ipfs, review_id)
     except AttestationError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -210,3 +321,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
             changed_files=[], author=pull_request.get("user", {}).get("login", "unknown"), criteria=bounty["criteria"])
         background_tasks.add_task(process_fixture_review, store, request.app.state.ipfs, review_record["id"], review_input, settings)
     return GitHubWebhookResponse(request_id=str(uuid4()), status="accepted" if created else "duplicate_review", delivery_id=delivery_id)
+
+
+web_directory = Path(__file__).resolve().parents[2] / "web"
+app.mount("/app", StaticFiles(directory=web_directory, html=True), name="dashboard")

@@ -68,13 +68,28 @@ npm.cmd run compile
 npm.cmd test
 ```
 
-The initial deployment policy is a 70% minimum score and a three-day challenge period. Both are admin-configurable, though new settings affect only future verdict submissions. Set `AMOY_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `DEFAULT_REWARD_TOKEN`, `RELAYER_ADDRESS`, and `DISPUTE_RESOLVER_ADDRESS` in `.env`, then deploy with:
+The initial deployment policy is a 70% minimum score and a three-day challenge period. Both are admin-configurable, though new settings affect only future verdict submissions. Set `AMOY_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `RELAYER_ADDRESS`, and `DISPUTE_RESOLVER_ADDRESS` in `.env`, then deploy with:
 
 ```bash
 npm.cmd run deploy:amoy
 ```
 
-The deploy command prints the exact `chainId` and the three contract addresses. Retain that JSON in the backend configuration; all later commands require the relevant deployed address.
+`DEFAULT_REWARD_TOKEN` is required for the protocol deployment, which avoids an accidental token deployment and mint. To create a demo token deliberately, run `npm.cmd run deploy:mock-usdc:amoy` once, save its address as `DEFAULT_REWARD_TOKEN`, then run `deploy:amoy`. The deploy command prints the exact `chainId`, token address, and the three contract addresses plus per-transaction gas usage. Retain that JSON in the backend configuration; all later commands require the relevant deployed address.
+
+If a prior Amoy attempt already deployed `BountyEscrow`, do not deploy it again. Set `BOUNTY_ESCROW_ADDRESS` and `DEFAULT_REWARD_TOKEN`, leave missing contract addresses blank, then run:
+
+```bash
+npm.cmd run deploy:resume:amoy
+npm.cmd run roles:check:amoy
+```
+
+The resume command deploys only the missing registry/manager contracts, grants only missing roles, and prints the `apps/api/.env` address values. The role check is read-only and should report `"ready": true` before switching the backend out of fixture mode.
+
+To deploy only the test token on the configured network:
+
+```bash
+npm.cmd run deploy:mock-usdc -- --network amoy
+```
 
 ## Contract integration commands
 
@@ -99,7 +114,7 @@ npm.cmd run bounty:resolve-dispute -- <dispute-manager> <bounty-id> <pay|refund>
 
 The `bounty:submit-verdict` command is the backend integration boundary. Keep the relayer key in a managed secret store, give the AI service no wallet access, verify the CID remains pinned, and feed only the prepared evidence bundle to the relayer queue.
 
-Polygon Amoy uses chain ID `80002` and POL for gas. `DEFAULT_REWARD_TOKEN` must be an ERC-20 deployed on Amoy; use a test token, not production USDC.
+Polygon Amoy uses chain ID `80002` and POL for gas. When `DEFAULT_REWARD_TOKEN` is provided, it must be an ERC-20 deployed on Amoy; use a test token, not production USDC.
 
 ## Security notes and next milestones
 

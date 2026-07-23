@@ -43,14 +43,15 @@ contract DisputeManager is AccessControl, Pausable, ReentrancyGuard {
     event DisputeOpened(bytes32 indexed bountyId, address indexed challenger, string evidenceCid);
     event DisputeResolved(bytes32 indexed bountyId, Resolution resolution, address indexed resolver);
 
-    constructor(address admin, address escrowAddress, address verdictRegistryAddress) {
-        if (admin == address(0) || escrowAddress == address(0) || verdictRegistryAddress == address(0)) {
+    constructor(address admin, address escrowAddress, address verdictRegistryAddress, address initialResolver) {
+        if (admin == address(0) || escrowAddress == address(0) || verdictRegistryAddress == address(0) || initialResolver == address(0)) {
             revert ZeroAddress();
         }
         if (escrowAddress.code.length == 0) revert DependencyMustBeContract(escrowAddress);
         if (verdictRegistryAddress.code.length == 0) revert DependencyMustBeContract(verdictRegistryAddress);
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(DISPUTE_ROLE, initialResolver);
         escrow = IBountyEscrow(escrowAddress);
         verdictRegistry = IVerdictRegistry(verdictRegistryAddress);
     }

@@ -19,6 +19,7 @@ describe("Fair Bounty Judge contracts", function () {
     const registry = await Registry.deploy(
       admin.address,
       await escrow.getAddress(),
+      relayer.address,
       minimumScore,
       challengePeriod
     );
@@ -26,13 +27,12 @@ describe("Fair Bounty Judge contracts", function () {
     const disputes = await Disputes.deploy(
       admin.address,
       await escrow.getAddress(),
-      await registry.getAddress()
+      await registry.getAddress(),
+      resolver.address
     );
 
     await escrow.grantRole(await escrow.VERDICT_REGISTRY_ROLE(), await registry.getAddress());
     await escrow.grantRole(await escrow.DISPUTE_MANAGER_ROLE(), await disputes.getAddress());
-    await registry.grantRole(await registry.RELAYER_ROLE(), relayer.address);
-    await disputes.grantRole(await disputes.DISPUTE_ROLE(), resolver.address);
     await token.mint(maintainer.address, 1_000_000n);
 
     return { ethers, admin, maintainer, contributor, relayer, resolver, outsider, token, escrow, registry, disputes };
@@ -277,11 +277,11 @@ describe("Fair Bounty Judge contracts", function () {
     const token = await Token.deploy();
     const validEscrow = await Escrow.deploy(admin.address, await token.getAddress());
     const Registry = await ethers.getContractFactory("VerdictRegistry");
-    await expect(Registry.deploy(admin.address, outsider.address, 7_000, DAY))
+    await expect(Registry.deploy(admin.address, outsider.address, admin.address, 7_000, DAY))
       .to.be.revertedWithCustomError(Registry, "EscrowMustBeContract");
-    const validRegistry = await Registry.deploy(admin.address, await validEscrow.getAddress(), 7_000, DAY);
+    const validRegistry = await Registry.deploy(admin.address, await validEscrow.getAddress(), admin.address, 7_000, DAY);
     const Disputes = await ethers.getContractFactory("DisputeManager");
-    await expect(Disputes.deploy(admin.address, outsider.address, await validRegistry.getAddress()))
+    await expect(Disputes.deploy(admin.address, outsider.address, await validRegistry.getAddress(), admin.address))
       .to.be.revertedWithCustomError(Disputes, "DependencyMustBeContract");
   });
 });

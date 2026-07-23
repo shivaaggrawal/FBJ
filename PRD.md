@@ -14,7 +14,7 @@ Crypto bounties improve incentives for open-source work but do not solve trust i
 
 - Reduce maintainer review effort.
 - Give contributors a fast, GitHub-native verdict.
-- Make verdict inputs and reasoning auditable.
+- Make verdict inputs and reasoning auditable.  
 - Enforce transparent escrow, challenge, and payout states.
 - Demonstrate useful multi-agent consensus rather than a single opaque score.
 

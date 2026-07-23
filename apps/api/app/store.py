@@ -20,6 +20,10 @@ class DuplicateBounty(Exception):
     pass
 
 
+class DuplicateDispute(Exception):
+    pass
+
+
 class Store:
     async def ensure_indexes(self) -> None: ...
     async def record_delivery(self, delivery_id: str, event_type: str, payload_hash: str) -> bool: ...
@@ -28,6 +32,10 @@ class Store:
     async def get_bounty(self, contract_bounty_id: str) -> dict[str, Any] | None: ...
     async def update_bounty(self, contract_bounty_id: str, values: dict[str, Any]) -> None: ...
     async def find_bounty(self, repository: str) -> dict[str, Any] | None: ...
+    async def create_dispute(self, dispute: dict[str, Any]) -> dict[str, Any]: ...
+    async def get_dispute(self, bounty_id: str) -> dict[str, Any] | None: ...
+    async def list_disputes(self) -> list[dict[str, Any]]: ...
+    async def update_dispute(self, bounty_id: str, values: dict[str, Any]) -> None: ...
     async def create_review(self, review: dict[str, Any]) -> tuple[dict[str, Any], bool]: ...
     async def update_review(self, review_id: str, values: dict[str, Any]) -> None: ...
     async def get_review(self, review_id: str) -> dict[str, Any] | None: ...
@@ -38,15 +46,21 @@ class Store:
     ) -> None: ...
     async def save_evidence(self, review_id: str, evidence_bytes: bytes, evidence_hash: str, evidence_cid: str) -> None: ...
     async def get_evidence(self, review_id: str) -> dict[str, Any] | None: ...
+    async def record_chain_event(self, chain_id: int, event: dict[str, Any]) -> bool: ...
+    async def get_chain_cursor(self, name: str) -> int | None: ...
+    async def save_chain_cursor(self, name: str, next_block: int) -> None: ...
 
 
 class MemoryStore(Store):
     def __init__(self) -> None:
         self.deliveries: dict[str, dict[str, Any]] = {}
         self.bounties: dict[str, dict[str, Any]] = {}
+        self.disputes: dict[str, dict[str, Any]] = {}
         self.reviews: dict[str, dict[str, Any]] = {}
         self.agent_results: dict[str, list[dict[str, Any]]] = {}
         self.evidence: dict[str, dict[str, Any]] = {}
+        self.chain_events: dict[str, dict[str, Any]] = {}
+        self.chain_cursors: dict[str, int] = {}
         self.dedupe_keys: set[str] = set()
 
     async def ensure_indexes(self) -> None:
@@ -84,6 +98,27 @@ class MemoryStore(Store):
                 return deepcopy(bounty)
         return None
 
+    async def create_dispute(self, dispute: dict[str, Any]) -> dict[str, Any]:
+        bounty_id = dispute["bounty_id"]
+        if bounty_id in self.disputes:
+            raise DuplicateDispute(bounty_id)
+        record = {**dispute, "id": str(uuid4()), "created_at": utcnow(), "updated_at": utcnow()}
+        self.disputes[bounty_id] = record
+        return deepcopy(record)
+
+    async def get_dispute(self, bounty_id: str) -> dict[str, Any] | None:
+        dispute = self.disputes.get(bounty_id)
+        return deepcopy(dispute) if dispute else None
+
+    async def list_disputes(self) -> list[dict[str, Any]]:
+        return [deepcopy(dispute) for dispute in sorted(self.disputes.values(), key=lambda item: item["created_at"], reverse=True)]
+
+    async def update_dispute(self, bounty_id: str, values: dict[str, Any]) -> None:
+        dispute = self.disputes.get(bounty_id)
+        if dispute is None:
+            raise KeyError(bounty_id)
+        dispute.update(values | {"updated_at": utcnow()})
+
     async def create_review(self, review: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         if review["dedupe_key"] in self.dedupe_keys:
             existing = next(item for item in self.reviews.values() if item["dedupe_key"] == review["dedupe_key"])
@@ -115,6 +150,19 @@ class MemoryStore(Store):
         evidence = self.evidence.get(review_id)
         return deepcopy(evidence) if evidence else None
 
+    async def record_chain_event(self, chain_id: int, event: dict[str, Any]) -> bool:
+        event_id = f"{chain_id}:{event['transaction_hash']}:{event['log_index']}"
+        if event_id in self.chain_events:
+            return False
+        self.chain_events[event_id] = deepcopy(event) | {"chain_id": chain_id, "recorded_at": utcnow()}
+        return True
+
+    async def get_chain_cursor(self, name: str) -> int | None:
+        return self.chain_cursors.get(name)
+
+    async def save_chain_cursor(self, name: str, next_block: int) -> None:
+        self.chain_cursors[name] = next_block
+
 
 class MongoStore(Store):
     def __init__(self, uri: str, database: str) -> None:
@@ -129,8 +177,10 @@ class MongoStore(Store):
             "reviews": ["id", "bounty_id", "repository", "pr_number", "commit_sha", "dedupe_key", "status", "created_at"],
             "evidence": ["review_id", "evidence_bytes", "evidence_hash", "evidence_cid", "created_at"],
             "agent_results": ["review_id", "agent", "score_bps", "created_at"],
-            "disputes": ["bounty_id", "review_id", "status", "created_at"],
+            "disputes": ["bounty_id", "status", "created_at"],
             "webhook_events": ["delivery_id", "event_type", "payload_hash", "status", "created_at"],
+            "chain_events": ["chain_id", "transaction_hash", "log_index", "event", "block_number", "recorded_at"],
+            "chain_cursors": ["name", "next_block", "updated_at"],
         }
         existing = await self.db.list_collection_names()
         for collection, required in validators.items():
@@ -145,6 +195,8 @@ class MongoStore(Store):
         await self.db.bounties.create_index([("repository", 1), ("status", 1)])
         await self.db.reviews.create_index([("bounty_id", 1), ("created_at", -1)])
         await self.db.disputes.create_index([("status", 1), ("bounty_id", 1)])
+        await self.db.chain_events.create_index([("chain_id", 1), ("transaction_hash", 1), ("log_index", 1)], unique=True)
+        await self.db.chain_cursors.create_index("name", unique=True)
 
     async def record_delivery(self, delivery_id: str, event_type: str, payload_hash: str) -> bool:
         from pymongo.errors import DuplicateKeyError
@@ -178,6 +230,27 @@ class MongoStore(Store):
 
     async def find_bounty(self, repository: str) -> dict[str, Any] | None:
         return await self.db.bounties.find_one({"repository": repository, "status": "open"}, {"_id": 0})
+
+    async def create_dispute(self, dispute: dict[str, Any]) -> dict[str, Any]:
+        from pymongo.errors import DuplicateKeyError
+        record = {**dispute, "id": str(uuid4()), "created_at": utcnow(), "updated_at": utcnow()}
+        try:
+            await self.db.disputes.insert_one(record)
+        except DuplicateKeyError as exc:
+            raise DuplicateDispute(dispute["bounty_id"]) from exc
+        return record
+
+    async def get_dispute(self, bounty_id: str) -> dict[str, Any] | None:
+        return await self.db.disputes.find_one({"bounty_id": bounty_id}, {"_id": 0})
+
+    async def list_disputes(self) -> list[dict[str, Any]]:
+        return [item async for item in self.db.disputes.find({}, {"_id": 0}).sort("created_at", -1)]
+
+    async def update_dispute(self, bounty_id: str, values: dict[str, Any]) -> None:
+        await self.db.disputes.update_one(
+            {"bounty_id": bounty_id},
+            {"$set": values | {"updated_at": utcnow()}},
+        )
 
     async def create_review(self, review: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         from pymongo.errors import DuplicateKeyError
@@ -214,4 +287,24 @@ class MongoStore(Store):
 
     async def get_evidence(self, review_id: str) -> dict[str, Any] | None:
         return await self.db.evidence.find_one({"review_id": review_id}, {"_id": 0})
+
+    async def record_chain_event(self, chain_id: int, event: dict[str, Any]) -> bool:
+        from pymongo.errors import DuplicateKeyError
+
+        try:
+            await self.db.chain_events.insert_one({**event, "chain_id": chain_id, "recorded_at": utcnow()})
+            return True
+        except DuplicateKeyError:
+            return False
+
+    async def get_chain_cursor(self, name: str) -> int | None:
+        cursor = await self.db.chain_cursors.find_one({"name": name}, {"_id": 0, "next_block": 1})
+        return cursor["next_block"] if cursor else None
+
+    async def save_chain_cursor(self, name: str, next_block: int) -> None:
+        await self.db.chain_cursors.update_one(
+            {"name": name},
+            {"$set": {"next_block": next_block, "updated_at": utcnow()}},
+            upsert=True,
+        )
 

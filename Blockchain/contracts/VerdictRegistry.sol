@@ -43,15 +43,17 @@ contract VerdictRegistry is IVerdictRegistry, AccessControl, Pausable {
     constructor(
         address admin,
         address escrowAddress,
+        address initialRelayer,
         uint16 initialMinimumPassingScoreBps,
         uint64 initialChallengePeriod
     ) {
-        if (admin == address(0) || escrowAddress == address(0)) revert ZeroAddress();
+        if (admin == address(0) || escrowAddress == address(0) || initialRelayer == address(0)) revert ZeroAddress();
         if (escrowAddress.code.length == 0) revert EscrowMustBeContract(escrowAddress);
         if (initialMinimumPassingScoreBps > MAX_SCORE_BPS) revert InvalidScore(initialMinimumPassingScoreBps);
         if (initialChallengePeriod == 0) revert InvalidChallengePeriod();
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(RELAYER_ROLE, initialRelayer);
         escrow = IBountyEscrow(escrowAddress);
         minimumPassingScoreBps = initialMinimumPassingScoreBps;
         challengePeriod = initialChallengePeriod;

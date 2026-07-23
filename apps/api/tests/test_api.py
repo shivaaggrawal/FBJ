@@ -21,12 +21,50 @@ def create_bounty():
 def test_health():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["fixture_mode"] is True
+    health = response.json()
+    assert health == {
+        "status": "ok",
+        "environment": settings.app_env,
+        "fixture_mode": settings.fixture_mode,
+        "ai_provider": settings.ai_provider,
+        "github_app_enabled": settings.github_app_enabled,
+    }
+    assert webhook_secret not in response.text
+
+
+def test_dashboard_is_served_by_the_api():
+    response = client.get("/app/")
+    assert response.status_code == 200
+    assert "Fair Bounty Judge" in response.text
 
 
 def test_invalid_webhook_signature_is_rejected():
     response = client.post("/webhooks/github", content=b"{}", headers={"X-Hub-Signature-256": "sha256=invalid"})
     assert response.status_code == 401
+
+
+def test_closed_webhook_is_ignored():
+    payload = (f'{{"action":"closed","number":1,"repository":{{"full_name":"{repository}"}}}}').encode()
+    signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
+    response = client.post("/webhooks/github", content=payload, headers={
+        "X-Hub-Signature-256": "sha256=" + signature,
+        "X-GitHub-Event": "pull_request",
+        "X-GitHub-Delivery": "closed-delivery",
+    })
+    assert response.status_code == 202
+    assert response.json()["status"] == "ignored"
+
+
+def test_webhook_without_matching_bounty_is_reported():
+    payload = (f'{{"action":"opened","number":1,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","user":{{"login":"developer"}}}}}}').encode()
+    signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
+    response = client.post("/webhooks/github", content=payload, headers={
+        "X-Hub-Signature-256": "sha256=" + signature,
+        "X-GitHub-Event": "pull_request",
+        "X-GitHub-Delivery": "no-bounty-delivery",
+    })
+    assert response.status_code == 202
+    assert response.json()["status"] == "no_matching_bounty"
 
 
 def test_valid_supported_webhook_is_accepted():
@@ -49,9 +87,10 @@ def test_duplicate_delivery_is_idempotent():
 
 def test_fixture_review_persists_evidence_and_supports_attestation():
     bounty_id = "0x" + "cd" * 32
+    recipient_wallet = "0x" + "9a" * 20
     bounty = client.post("/api/bounties", json={"contract_bounty_id": bounty_id, "repository": "owner/attestation-demo",
         "issue_url": "https://github.com/owner/attestation-demo/issues/1", "reward_token": "0x" + "56" * 20,
-        "reward_amount": "1000000", "maintainer_wallet": "0x" + "78" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600})
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "78" * 20, "recipient_wallet": recipient_wallet, "expires_at": 1_900_000_000, "challenge_seconds": 3600})
     assert bounty.status_code == 201
 
     review = client.post("/api/reviews/fixture", json={"bounty_id": bounty_id, "repository": "owner/attestation-demo",
@@ -66,9 +105,10 @@ def test_fixture_review_persists_evidence_and_supports_attestation():
     assert evidence.headers["x-evidence-hash"] == payload["evidence_hash"]
     assert evidence.headers["x-evidence-cid"] == payload["evidence_cid"]
 
-    attestation = client.post(f"/api/reviews/{payload['review_id']}/attest", json={"recipient_wallet": "0x" + "9a" * 20})
+    attestation = client.post(f"/api/reviews/{payload['review_id']}/attest", json={"recipient_wallet": "0x" + "ff" * 20})
     assert attestation.status_code == 202
     assert attestation.json()["status"] == "confirmed"
+    assert client.get(f"/api/reviews/{payload['review_id']}").json()["recipient_wallet"] == recipient_wallet
 
     release = client.post(f"/api/bounties/{bounty_id}/release")
     assert release.status_code == 202
@@ -77,3 +117,29 @@ def test_fixture_review_persists_evidence_and_supports_attestation():
 
 def test_duplicate_bounty_registration_is_rejected():
     assert create_bounty().status_code == 409
+
+
+def test_wallet_preparation_endpoints_return_unsigned_actions():
+    bounty_id = "0x" + "ef" * 32
+    create = client.post("/api/bounties/prepare", json={"contract_bounty_id": bounty_id, "repository": repository,
+        "issue_url": f"https://github.com/{repository}/issues/3", "reward_token": "0x" + "12" * 20,
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600})
+    assert create.status_code == 200
+    assert create.json()["transaction"]["approval"]["operation"] == "approve"
+
+    bounty = client.post("/api/bounties", json={"contract_bounty_id": bounty_id, "repository": "owner/dispute-demo",
+        "issue_url": "https://github.com/owner/dispute-demo/issues/1", "reward_token": "0x" + "12" * 20,
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600})
+    assert bounty.status_code == 201
+
+    dispute = client.post(f"/api/bounties/{bounty_id}/disputes/prepare", json={"evidence": {"reason": "needs adjudication"}})
+    assert dispute.status_code == 200
+    assert dispute.json()["transaction"]["operation"] == "open_dispute"
+    assert dispute.json()["evidence_cid"].startswith("Qm")
+
+    resolution = client.post(f"/api/bounties/{bounty_id}/disputes/resolve/prepare", json={"resolution": 2})
+    assert resolution.status_code == 200
+    assert resolution.json()["transaction"]["operation"] == "resolve_dispute"
+
+    assert client.post(f"/api/bounties/{bounty_id}/cancel/prepare").json()["transaction"]["operation"] == "cancel_open_bounty"
+    assert client.post(f"/api/bounties/{bounty_id}/refund/prepare").json()["transaction"]["operation"] == "refund_expired_bounty"

@@ -34,15 +34,15 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 - [ ] Set `AMOY_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `DEFAULT_REWARD_TOKEN`, `RELAYER_ADDRESS`, and `DISPUTE_RESOLVER_ADDRESS`.
 - [ ] Deploy with `npm.cmd run deploy:amoy` and save the returned chain ID and three contract addresses in non-secret application configuration.
 - [ ] Verify each deployed contract on the selected explorer if time permits.
-- [ ] Confirm roles after deployment: registry has escrow registry role; dispute manager has escrow dispute role; relayer has registry relayer role; resolver has dispute role.
+- [x] Add a read-only role audit command: `npm.cmd run roles:check:amoy` verifies the deployed dependency graph and all required roles.
 - [x] Add an application contract configuration object: `chainId`, `bountyEscrow`, `verdictRegistry`, `disputeManager`, `rewardToken`.
 - [ ] Generate/use ABIs and typed contract clients in the backend and dashboard.
 - [ ] Implement backend calls to existing functions:
-  - [ ] `createBounty(bytes32,address,uint128,uint64)` after user approves the ERC-20 allowance.
+  - [x] Prepare `createBounty(bytes32,address,uint128,uint64)` plus ERC-20 approval for a connected wallet, then verify its confirmed transaction before registration.
   - [x] `submitVerdict(bytes32,bytes32,string,address,uint16)` from the relayer service.
   - [x] `releaseBounty(bytes32)` after the challenge deadline.
-  - [ ] `openDispute(bytes32,string)` from the connected maintainer/recipient wallet.
-  - [ ] `resolveDispute(bytes32,Resolution)` from the designated resolver.
+  - [x] Prepare `openDispute(bytes32,string)` from the connected maintainer/recipient wallet with pinned, hash-verified evidence.
+  - [x] Prepare `resolveDispute(bytes32,Resolution)` from the designated resolver wallet.
 - [ ] Subscribe to `BountyCreated`, `VerdictSubmitted`, `DisputeOpened`, `BountyPaid`, and `BountyRefunded`; persist transaction hashes and statuses.
 - [ ] Add one Amoy end-to-end smoke test using a small test-token bounty.
 - [x] Align `SPEC.md` terminology and contract signatures with this ERC-20 implementation.
@@ -68,7 +68,7 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 - [x] Create/update a pending GitHub Check immediately.
 - [x] Post a completed check and PR summary after review.
 - [ ] Add inline annotations only when a finding can be mapped reliably to a changed line.
-- [ ] Test duplicate delivery, invalid signature, large diff, closed PR, and a PR with no matching bounty.
+- [x] Test duplicate delivery, invalid signature, large diff redaction/truncation, closed PR, and a PR with no matching bounty.
 
 ## 5. AI review workflow
 
@@ -78,7 +78,7 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 - [x] Implement the spam/low-effort agent with typed JSON output.
 - [x] Run the three agents concurrently with timeout, retry, and error capture.
 - [x] Implement deterministic supervisor scoring in basis points (0–10,000).
-- [ ] Flag manual review when an agent score is below 4,000 bps or the score spread exceeds 3,500 bps.
+- [x] Flag manual review when an agent score is below 4,000 bps or the score spread exceeds 3,500 bps.
 - [x] Keep raw agent results, model identifier, prompt version, and timestamps.
 - [x] Add deterministic fixture mode for demonstrations and tests.
 - [x] Redact secrets and cap/truncate large diffs before sending them to model providers; record any truncation.
@@ -97,13 +97,13 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 
 ## 7. Dashboard
 
-- [ ] Create wallet connection targeting Polygon Amoy.
-- [ ] Build bounty creation: GitHub Issue URL, reward amount, expiry, recipient policy, ERC-20 approval, and contract transaction status.
-- [ ] Build active-bounties list with contract and database lifecycle state.
-- [ ] Build verdict detail: score, agent breakdown, findings, CID, evidence-hash verification, and transaction links.
+- [x] Create wallet connection targeting Polygon Amoy.
+- [x] Build bounty creation: GitHub Issue URL, reward amount, expiry, recipient policy, ERC-20 approval, and contract transaction status.
+- [x] Build active-bounties list with contract and database lifecycle state.
+- [x] Build verdict detail: score, agent breakdown, findings, CID, evidence-hash verification, and transaction links.
 - [ ] Display challenge countdown and permitted actions.
-- [ ] Build dispute form that uploads/pins dispute evidence and calls `openDispute`.
-- [ ] Build resolver-only dispute controls for payout/refund.
+- [x] Build dispute form that uploads/pins dispute evidence and calls `openDispute`.
+- [x] Build resolver-only dispute controls for payout/refund.
 - [ ] Show clear pending, confirmed, failed, disputed, and settled states.
 
 ## 8. End-to-end verification and submission

@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     dispute_manager_address: str | None = None
     reward_token_address: str | None = None
     relayer_private_key: SecretStr | None = None
+    dispute_resolver_private_key: SecretStr | None = None
+    chain_event_poll_seconds: int = 15
+    chain_event_confirmations: int = 3
+    chain_event_start_block: int | None = None
 
     @property
     def github_allowed_repositories(self) -> list[str]:
@@ -55,6 +59,8 @@ class Settings(BaseSettings):
             raise ValueError("GROQ_API_KEY is required when AI_PROVIDER=groq")
         if self.ipfs_provider == "pinata" and self.pinata_jwt is None:
             raise ValueError("PINATA_JWT is required when IPFS_PROVIDER=pinata")
+        if self.chain_event_poll_seconds <= 0 or self.chain_event_confirmations < 0:
+            raise ValueError("Chain event polling values must be non-negative")
         if not self.fixture_mode and self.database_mode != "mongodb":
             raise ValueError("Non-fixture deployments require DATABASE_MODE=mongodb")
         if not self.fixture_mode:

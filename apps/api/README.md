@@ -14,6 +14,14 @@ python -m pytest
 
 Fixture review is available at `POST /api/reviews/fixture` only when `FIXTURE_MODE=true`. It uses deterministic review output, an in-process IPFS-compatible CID, and a fixture chain client, so the entire evidence-to-verdict path can be exercised without credentials.
 
+Run the complete local bounty, review, evidence, attestation, and payout flow without Amoy POL:
+
+```powershell
+python scripts/fixture_e2e.py
+```
+
+The browser dashboard is served by the API at `http://127.0.0.1:8000/app/`. It connects an Amoy wallet, prepares ERC-20 approval and bounty transactions, registers confirmed bounties, displays evidence/review state, and prepares wallet-signed dispute, cancellation, refund, and resolver actions.
+
 ## MongoDB development mode
 
 For durable local state, start MongoDB with `docker compose -f ../../infra/docker-compose.yml up -d`, then set `DATABASE_MODE=mongodb` in `.env`. Startup creates collection validation rules and indexes for bounties, reviews, evidence, agent results, disputes, and webhook deliveries. The default `memory` mode needs no external services and is intended for tests and fixture demos.
@@ -30,8 +38,13 @@ Core endpoints:
 - `GET /api/reviews/{review_id}` and `GET /api/reviews/{review_id}/evidence` expose review state and the canonical JSON that was hashed.
 - `POST /api/reviews/{review_id}/attest` submits an eligible verdict through the configured relayer.
 - `POST /api/bounties/{contract_bounty_id}/release` calls `BountyEscrow.releaseBounty` after the contract's challenge window has passed.
+- `POST /api/bounties/prepare` returns the ERC-20 approval and `createBounty` wallet transactions.
+- `POST /api/bounties/{contract_bounty_id}/disputes/prepare` pins and verifies dispute evidence, then returns an `openDispute` wallet transaction.
+- `POST /api/bounties/{contract_bounty_id}/disputes/resolve/prepare`, `/cancel/prepare`, and `/refund/prepare` return role-checked wallet transactions.
 
 Set `FIXTURE_MODE=false`, `DATABASE_MODE=mongodb`, `IPFS_PROVIDER=pinata`, and the deployment values in `.env` to enable the real Amoy + Pinata flow. The relayer private key must only hold `RELAYER_ROLE`; review code must never receive it.
+
+The attestation endpoint never accepts a payout address from its caller. It uses only the `recipient_wallet` saved with the verified bounty registration, re-fetches the evidence CID from IPFS, and verifies its Keccak hash before submitting the relayer transaction.
 
 ## Creating A Real Bounty
 
@@ -42,3 +55,9 @@ The API deliberately does not hold a maintainer private key. A maintainer wallet
 3. Submit the creation metadata, transaction hash, and maintainer signature to `POST /api/bounties`. Request `POST /api/bounties/registration-message` with the same payload first to obtain the exact message to sign with `personal_sign`.
 
 `expires_at` is the exact Unix timestamp submitted to the contract. `challenge_seconds` is retained as application metadata; the deployed `VerdictRegistry` challenge period controls the actual on-chain release delay.
+
+## Chain Adapter Capabilities
+
+The backend adapter prepares unsigned wallet transactions for bounty creation, cancellation, opening disputes, and resolver approval. It broadcasts only operations that are safe for its configured service wallets: verdict submission, payout release, expired-bounty refunds, and optionally dispute resolution when `DISPUTE_RESOLVER_PRIVATE_KEY` is configured. It also reads bounties, verdicts, disputes, and normalized contract events for database reconciliation.
+
+In non-fixture mode the API polls confirmed contract events and stores a replay-safe cursor in MongoDB. Set `CHAIN_EVENT_START_BLOCK` to the deployment block to index earlier activity; leaving it empty starts at the current confirmed block.
