@@ -349,6 +349,7 @@ def _verified_signature(payload: bytes, signature: str | None, secret: str) -> b
     return hmac.compare_digest(signature, "sha256=" + digest)
 
 
+@app.post("/", response_model=GitHubWebhookResponse, status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
 @app.post("/webhooks/github", response_model=GitHubWebhookResponse, status_code=status.HTTP_202_ACCEPTED)
 async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_hub_signature_256: str | None = Header(default=None), x_github_delivery: str | None = Header(default=None), settings: Settings = Depends(get_settings), store: Store = Depends(get_store)) -> GitHubWebhookResponse:
     payload = await request.body()

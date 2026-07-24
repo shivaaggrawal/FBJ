@@ -43,6 +43,18 @@ def test_invalid_webhook_signature_is_rejected():
     assert response.status_code == 401
 
 
+def test_root_path_accepts_signed_github_webhooks_for_tunnel_compatibility():
+    payload = b'{"action":"closed"}'
+    signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
+    response = client.post("/", content=payload, headers={
+        "X-Hub-Signature-256": "sha256=" + signature,
+        "X-GitHub-Event": "pull_request",
+        "X-GitHub-Delivery": "root-path-delivery",
+    })
+    assert response.status_code == 202
+    assert response.json()["status"] == "ignored"
+
+
 def test_closed_webhook_is_ignored():
     payload = (f'{{"action":"closed","number":1,"repository":{{"full_name":"{repository}"}}}}').encode()
     signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
