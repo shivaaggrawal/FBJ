@@ -8,7 +8,7 @@
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/app/" aria-label="Fair Bounty Judge dashboard"><span>FBJ</span> Fair Bounty Judge</a>
+      <a class="brand" href="/app/" aria-label="Fair Bounty Judge dashboard"><span class="brand-mark">FBJ</span><span class="brand-copy"><strong>Fair Bounty Judge</strong><small>Open work. Verified outcomes.</small></span></a>
       <div class="topbar-actions">
         <span id="network-status" class="network-status">API connected</span>
         <button id="connect-wallet" class="primary" type="button">Connect wallet</button>
@@ -18,46 +18,47 @@
       <aside class="sidebar">
         <button class="nav-link active" type="button" data-view="bounties">Bounties</button>
         <button class="nav-link" type="button" data-view="disputes">Disputes</button>
-        <div class="sidebar-note"><span class="dot"></span> Polygon Amoy</div>
+        <div class="sidebar-note"><span class="dot"></span><span>Polygon Amoy</span><small>Connected network</small></div>
       </aside>
       <section class="workspace">
         <div id="notice" class="notice" aria-live="polite"></div>
         <section id="bounties-view" class="view active">
           <div class="page-heading">
-            <div><h1>Fund work. Prove the review.</h1><p>GitHub-native bounties with transparent AI review, challenge windows, and on-chain payout protection.</p></div>
+            <div><p class="eyebrow">THE VERIFIABLE WORK MARKETPLACE</p><h1>Fund work.<br><em>Prove the review.</em></h1><p>GitHub-native bounties with transparent AI review, challenge windows, and on-chain payout protection.</p></div>
             <button id="refresh-bounties" class="icon-button" type="button" title="Refresh bounties">Refresh</button>
           </div>
           <section class="trust-strip" aria-label="Product value proposition">
-            <article><span class="trust-icon">01</span><div><strong>Escrow first</strong><p>Funds stay locked until the review window closes.</p></div></article>
-            <article><span class="trust-icon">02</span><div><strong>Three independent signals</strong><p>Quality, security, and contribution quality are scored separately.</p></div></article>
-            <article><span class="trust-icon">03</span><div><strong>Proof you can verify</strong><p>Commit, evidence hash, IPFS bundle, and transaction stay linked.</p></div></article>
+            <article><span class="trust-icon">01</span><div><strong>Escrow first</strong><p>Funds stay locked until the review window closes.</p></div><span class="trust-arrow">↗</span></article>
+            <article><span class="trust-icon">02</span><div><strong>Three independent signals</strong><p>Quality, security, and contribution quality are scored separately.</p></div><span class="trust-arrow">↗</span></article>
+            <article><span class="trust-icon">03</span><div><strong>Proof you can verify</strong><p>Commit, evidence hash, IPFS bundle, and transaction stay linked.</p></div><span class="trust-arrow">↗</span></article>
           </section>
           <section class="metric-grid" aria-label="Bounty metrics">
-            <article class="metric-card"><span>Funded bounties</span><strong id="metric-total">0</strong><small>All registered rewards</small></article>
-            <article class="metric-card"><span>In progress</span><strong id="metric-active">0</strong><small>Open or under review</small></article>
-            <article class="metric-card"><span>Paid out</span><strong id="metric-paid">0</strong><small>Completed settlements</small></article>
-            <article class="metric-card"><span>Needs attention</span><strong id="metric-attention">0</strong><small>Disputes or flagged work</small></article>
+            <article class="metric-card"><span>Funded bounties</span><strong id="metric-total">0</strong><small>All registered rewards <b>↗</b></small></article>
+            <article class="metric-card"><span>In progress</span><strong id="metric-active">0</strong><small>Open or under review <b>↗</b></small></article>
+            <article class="metric-card"><span>Paid out</span><strong id="metric-paid">0</strong><small>Completed settlements <b>↗</b></small></article>
+            <article class="metric-card attention"><span>Needs attention</span><strong id="metric-attention">0</strong><small>Disputes or flagged work <b>↗</b></small></article>
           </section>
           <div class="bounty-layout">
             <form id="create-bounty-form" class="tool-panel">
               <input name="challenge_seconds" type="hidden" value="259200">
-              <div class="panel-heading"><h2>Create bounty</h2><span class="status-pill">Wallet required</span></div>
+              <div class="panel-heading"><div><p class="section-kicker">01 / PUBLISH A BRIEF</p><h2>Create bounty</h2></div><span class="status-pill">Wallet required</span></div>
               <p class="form-intro">Define success clearly so contributors and reviewers evaluate the same goal.</p>
-              <label>Repository<input name="repository" required placeholder="owner/repository"></label>
+              <label>Repository<input name="repository" required placeholder="owner/repository"><small class="field-hint">Use the GitHub owner and repository name.</small></label>
               <label>Issue URL<input name="issue_url" type="url" required placeholder="https://github.com/owner/repo/issues/1"></label>
-              <label>Acceptance criteria<textarea name="criteria" rows="3" placeholder="What must the contribution achieve?"></textarea></label>
+              <label>Acceptance criteria<textarea name="criteria" rows="3" placeholder="What must the contribution achieve?"></textarea><small class="field-hint">Clear criteria create faster, fairer reviews.</small></label>
+              <p class="section-kicker form-section-kicker">02 / SET THE REWARD</p>
               <div class="field-row token-row">
                 <label>Token<input name="reward_token" required value="0x0000000000000000000000000000000000000000"></label>
                 <label>Amount<input name="reward_amount" required inputmode="numeric" value="1000000"></label>
               </div>
-              <div class="field-row">
+              <p class="section-kicker form-section-kicker">03 / PROTECT THE PAYOUT</p><div class="field-row">
                 <label>Expiry<input name="expires_at" required type="datetime-local"></label>
                 <label>Recipient wallet<input name="recipient_wallet" required placeholder="Contributor wallet"></label>
               </div>
-              <button class="primary full" type="submit">Approve and create</button>
+              <button class="primary full" type="submit"><span>Approve and create</span><b>&rarr;</b></button>
             </form>
             <section class="list-panel">
-              <div class="panel-heading"><h2>Active bounties</h2><span id="bounty-count" class="muted">0</span></div>
+              <div class="panel-heading"><div><p class="section-kicker">YOUR WORK QUEUE</p><h2>Active bounties</h2></div><span id="bounty-count" class="count-badge">0</span></div>
               <div class="list-controls"><label class="sr-only" for="bounty-search">Search bounties</label><input id="bounty-search" type="search" placeholder="Search repository or bounty ID"><label class="sr-only" for="bounty-status">Filter by status</label><select id="bounty-status"><option value="all">All statuses</option><option value="open">Open</option><option value="under_review">Under review</option><option value="challenged">Challenged</option><option value="paid_out">Paid out</option><option value="disputed">Disputed</option></select></div>
               <div id="bounty-list" class="bounty-list"><p class="empty">Loading bounties...</p></div>
             </section>

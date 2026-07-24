@@ -2,18 +2,18 @@
 
 ## Current baseline
 
-The blockchain implementation in `Blockchain/` is substantially complete and verified locally: `npm.cmd test` passes **10/10 tests**. It uses ERC-20 rewards on Polygon Amoy, not native-token deposits. The application must integrate with its existing interfaces rather than rebuild contracts.
+The blockchain implementation in `Blockchain/` is deployed on Polygon Amoy and verified locally: `npm.cmd test` passes **10/10 tests**. It uses ERC-20 rewards on Polygon Amoy, not native-token deposits. The API, dashboard, GitHub App, MongoDB, Pinata, and Groq configuration are integrated. The remaining work is primarily real external end-to-end proof and submission material.
 
 ## 0. Decisions to lock before wiring components
 
-- [ ] Select the AI model/provider and record model names, prompt versions, and data-retention settings.
-- [ ] Select the IPFS pinning provider and create an API credential.
-- [ ] Select a MongoDB deployment (local Docker or MongoDB Atlas) and create a development database.
-- [ ] Choose the GitHub organization/repository used for the live demo.
-- [ ] Confirm the reward ERC-20 token deployed on Polygon Amoy (test token only).
-- [ ] Confirm the relayer wallet and dispute-resolver wallet.
-- [ ] Decide the demo score policy: current chain threshold is 7,000 bps (70%).
-- [ ] Decide the demo challenge period: current deployment script default is three days; use a short test/demo period only in a dedicated demo deployment.
+- [x] Select the AI model/provider and record model names and prompt version. Runtime is configured for Groq (`llama-3.3-70b-versatile`).
+- [x] Select the IPFS pinning provider and create an API credential (Pinata).
+- [x] Select MongoDB and configure the development database.
+- [x] Choose the GitHub repository used for the live demo (`shivaaggrawal/Image-Editor`).
+- [x] Confirm the test ERC-20 reward token deployed on Polygon Amoy.
+- [x] Confirm the relayer wallet and dispute-resolver wallet.
+- [x] Decide the demo score policy: chain threshold is 7,000 bps (70%).
+- [x] Decide the demo challenge period: deployment metadata uses three days.
 
 ## 1. Blockchain — already implemented
 
@@ -28,22 +28,23 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 
 ## 2. Blockchain — remaining integration work
 
-- [ ] Create the repository-root `.env` locally from `.env.example`; never commit it. This single file is used by both the API and Hardhat.
-- [ ] Fund deployment and relayer wallets with Amoy POL for gas.
-- [ ] Deploy or choose a test ERC-20 reward token on Amoy.
-- [ ] Set `AMOY_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `DEFAULT_REWARD_TOKEN`, `RELAYER_ADDRESS`, and `DISPUTE_RESOLVER_ADDRESS`.
-- [ ] Deploy with `npm.cmd run deploy:amoy` and save the returned chain ID and three contract addresses in non-secret application configuration.
+- [x] Create the repository-root `.env` locally from `.env.example`; never commit it. This single file is used by both the API and Hardhat.
+- [x] Fund the deployment and service wallets with Amoy POL for deployment and demos.
+- [x] Deploy a test ERC-20 reward token on Amoy.
+- [x] Set RPC, deployment, reward-token, relayer, resolver, and deployed-contract configuration.
+- [x] Deploy the contracts to Amoy and save the chain ID and deployed addresses in local configuration.
 - [ ] Verify each deployed contract on the selected explorer if time permits.
 - [x] Add a read-only role audit command: `npm.cmd run roles:check:amoy` verifies the deployed dependency graph and all required roles.
 - [x] Add an application contract configuration object: `chainId`, `bountyEscrow`, `verdictRegistry`, `disputeManager`, `rewardToken`.
 - [ ] Generate/use ABIs and typed contract clients in the backend and dashboard.
-- [ ] Implement backend calls to existing functions:
+- [x] Implement backend calls to existing functions:
   - [x] Prepare `createBounty(bytes32,address,uint128,uint64)` plus ERC-20 approval for a connected wallet, then verify its confirmed transaction before registration.
   - [x] `submitVerdict(bytes32,bytes32,string,address,uint16)` from the relayer service.
   - [x] `releaseBounty(bytes32)` after the challenge deadline.
   - [x] Prepare `openDispute(bytes32,string)` from the connected maintainer/recipient wallet with pinned, hash-verified evidence.
   - [x] Prepare `resolveDispute(bytes32,Resolution)` from the designated resolver wallet.
-- [ ] Subscribe to `BountyCreated`, `VerdictSubmitted`, `DisputeOpened`, `BountyPaid`, and `BountyRefunded`; persist transaction hashes and statuses.
+- [x] Poll and persist `BountyCreated`, `VerdictSubmitted`, `DisputeOpened`, `BountyPaid`, `BountyRefunded`, and resolution events with replay-safe cursors.
+- [ ] Set `CHAIN_EVENT_START_BLOCK` to the Amoy deployment block before the first real demo, so historical events can be replayed after restarts.
 - [ ] Add one Amoy end-to-end smoke test using a small test-token bounty.
 - [x] Align `SPEC.md` terminology and contract signatures with this ERC-20 implementation.
 
@@ -59,8 +60,8 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 
 ## 4. GitHub App and webhook flow
 
-- [ ] Create a GitHub App with only required permissions: Checks read/write, Pull requests read/write, Contents read, Issues read.
-- [ ] Install it only on the demo repository.
+- [x] Create and configure the GitHub App. Read-only authentication was verified against the demo repository.
+- [x] Install the GitHub App on the demo repository.
 - [x] Implement `POST /webhooks/github` and validate `X-Hub-Signature-256`.
 - [x] Handle `pull_request` opened, synchronize, and reopened events.
 - [x] Find the matching bounty by repository and issue/PR criteria.

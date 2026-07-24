@@ -5,8 +5,7 @@ __pycache__/
 .venv/
 
 # Local configuration (commit only sanitized example files)
-.env
-.env.*
+
 !.env.example
 .sandbox/
 
