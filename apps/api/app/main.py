@@ -16,10 +16,16 @@ from .chain import ChainClient, build_chain_client
 from .config import Settings, get_settings
 from .disputes import (
     DisputeError,
+    confirm_cancel_open_bounty,
+    confirm_dispute_resolution,
+    confirm_open_dispute,
+    confirm_refund_expired_bounty,
     prepare_cancel_open_bounty,
     prepare_dispute_resolution,
     prepare_open_dispute,
     prepare_refund_expired_bounty,
+    refund_expired_bounty_with_service,
+    resolve_dispute_with_service,
 )
 from .event_indexer import monitor_chain_events
 from .github import GitHubAppClient
@@ -30,11 +36,13 @@ from .schemas import (
     BountyRegistrationRequest,
     BountyResponse,
     DisputeEvidenceRequest,
+    DisputeResolutionConfirmationRequest,
     DisputeResolutionRequest,
     GitHubWebhookResponse,
     ReviewInput,
     ReviewResponse,
     TransactionResponse,
+    TransactionHashRequest,
     WalletTransactionResponse,
 )
 from .store import DuplicateBounty, MemoryStore, MongoStore, Store
@@ -180,6 +188,14 @@ async def get_dispute(contract_bounty_id: str, store: Store = Depends(get_store)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@app.get("/api/transactions/{transaction_hash}", response_model=TransactionResponse)
+async def get_transaction_status(transaction_hash: str, chain: ChainClient = Depends(get_chain)) -> dict:
+    try:
+        return await chain.get_transaction_status(transaction_hash)
+    except ChainError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
 @app.post("/api/bounties/{contract_bounty_id}/disputes/prepare", response_model=WalletTransactionResponse)
 async def prepare_bounty_dispute(
     contract_bounty_id: str,
@@ -201,6 +217,16 @@ async def prepare_bounty_dispute(
     }
 
 
+@app.post("/api/bounties/{contract_bounty_id}/disputes/confirm", response_model=TransactionResponse)
+async def confirm_bounty_dispute(
+    contract_bounty_id: str, payload: TransactionHashRequest, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)
+) -> dict:
+    try:
+        return await confirm_open_dispute(store, chain, contract_bounty_id, payload.transaction_hash)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @app.post("/api/bounties/{contract_bounty_id}/disputes/resolve/prepare", response_model=WalletTransactionResponse)
 async def prepare_bounty_dispute_resolution(
     contract_bounty_id: str, payload: DisputeResolutionRequest, chain: ChainClient = Depends(get_chain)
@@ -212,6 +238,27 @@ async def prepare_bounty_dispute_resolution(
     return {"operation": "resolve_dispute", "transaction": transaction}
 
 
+@app.post("/api/bounties/{contract_bounty_id}/disputes/resolve/confirm", response_model=TransactionResponse)
+async def confirm_bounty_dispute_resolution(
+    contract_bounty_id: str, payload: DisputeResolutionConfirmationRequest,
+    store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)
+) -> dict:
+    try:
+        return await confirm_dispute_resolution(store, chain, contract_bounty_id, payload.resolution, payload.transaction_hash)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/api/bounties/{contract_bounty_id}/disputes/resolve", response_model=TransactionResponse, status_code=status.HTTP_202_ACCEPTED)
+async def resolve_bounty_dispute_with_service(
+    contract_bounty_id: str, payload: DisputeResolutionRequest, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)
+) -> dict:
+    try:
+        return await resolve_dispute_with_service(store, chain, contract_bounty_id, payload.resolution)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @app.post("/api/bounties/{contract_bounty_id}/cancel/prepare", response_model=WalletTransactionResponse)
 async def prepare_bounty_cancellation(contract_bounty_id: str, chain: ChainClient = Depends(get_chain)) -> dict:
     try:
@@ -221,6 +268,16 @@ async def prepare_bounty_cancellation(contract_bounty_id: str, chain: ChainClien
     return {"operation": "cancel_open_bounty", "transaction": transaction}
 
 
+@app.post("/api/bounties/{contract_bounty_id}/cancel/confirm", response_model=TransactionResponse)
+async def confirm_bounty_cancellation(
+    contract_bounty_id: str, payload: TransactionHashRequest, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)
+) -> dict:
+    try:
+        return await confirm_cancel_open_bounty(store, chain, contract_bounty_id, payload.transaction_hash)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @app.post("/api/bounties/{contract_bounty_id}/refund/prepare", response_model=WalletTransactionResponse)
 async def prepare_expired_bounty_refund(contract_bounty_id: str, chain: ChainClient = Depends(get_chain)) -> dict:
     try:
@@ -228,6 +285,26 @@ async def prepare_expired_bounty_refund(contract_bounty_id: str, chain: ChainCli
     except DisputeError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return {"operation": "refund_expired_bounty", "transaction": transaction}
+
+
+@app.post("/api/bounties/{contract_bounty_id}/refund/confirm", response_model=TransactionResponse)
+async def confirm_expired_bounty_refund(
+    contract_bounty_id: str, payload: TransactionHashRequest, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)
+) -> dict:
+    try:
+        return await confirm_refund_expired_bounty(store, chain, contract_bounty_id, payload.transaction_hash)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/api/bounties/{contract_bounty_id}/refund", response_model=TransactionResponse, status_code=status.HTTP_202_ACCEPTED)
+async def refund_expired_bounty_service_endpoint(
+    contract_bounty_id: str, store: Store = Depends(get_store), chain: ChainClient = Depends(get_chain)
+) -> dict:
+    try:
+        return await refund_expired_bounty_with_service(store, chain, contract_bounty_id)
+    except DisputeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @app.get("/api/reviews/{review_id}")

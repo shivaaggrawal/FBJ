@@ -62,13 +62,13 @@ Transfer the default admin role to a multisig before production. A production de
 ## Local development
 
 ```bash
-copy .env.example .env
+copy ..\.env.example ..\.env
 npm.cmd install
 npm.cmd run compile
 npm.cmd test
 ```
 
-The initial deployment policy is a 70% minimum score and a three-day challenge period. Both are admin-configurable, though new settings affect only future verdict submissions. Set `AMOY_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `RELAYER_ADDRESS`, and `DISPUTE_RESOLVER_ADDRESS` in `.env`, then deploy with:
+The initial deployment policy is a 70% minimum score and a three-day challenge period. Both are admin-configurable, though new settings affect only future verdict submissions. Set `AMOY_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `RELAYER_ADDRESS`, and `DISPUTE_RESOLVER_ADDRESS` in the repository-root `.env`, then deploy with:
 
 ```bash
 npm.cmd run deploy:amoy
@@ -83,7 +83,7 @@ npm.cmd run deploy:resume:amoy
 npm.cmd run roles:check:amoy
 ```
 
-The resume command deploys only the missing registry/manager contracts, grants only missing roles, and prints the `apps/api/.env` address values. The role check is read-only and should report `"ready": true` before switching the backend out of fixture mode.
+The resume command deploys only the missing registry/manager contracts, grants only missing roles, and prints the repository-root `.env` address values. The role check is read-only and should report `"ready": true` before switching the backend out of fixture mode.
 
 To deploy only the test token on the configured network:
 

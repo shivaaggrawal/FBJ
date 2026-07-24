@@ -27,7 +27,12 @@ def test_fixture_chain_prepares_wallet_actions_and_exposes_chain_events():
         events = await chain.list_events(0)
         assert events[0]["event"] == "VerdictSubmitted"
         assert (await chain.get_dispute(BOUNTY_ID))["open"] is False
+        opened = await chain.confirm_open_dispute(BOUNTY_ID, CID, "0x" + "11" * 32)
+        assert opened["status"] == "confirmed"
+        assert (await chain.get_dispute(BOUNTY_ID))["open"] is True
         assert (await chain.resolve_dispute(BOUNTY_ID, 2))["status"] == "confirmed"
+        assert (await chain.get_dispute(BOUNTY_ID))["resolution"] == 2
+        assert (await chain.get_transaction_status(opened["transaction_hash"]))["status"] == "confirmed"
         assert (await chain.refund_expired_bounty(BOUNTY_ID))["status"] == "confirmed"
 
     asyncio.run(run())
@@ -57,5 +62,24 @@ def test_event_indexer_updates_known_bounties_and_ignores_replays():
         assert (await store.get_bounty(BOUNTY_ID))["status"] == "verdict_submitted"
         assert await store.get_chain_cursor("chain-events:80002") == 2
         assert await sync_chain_events(store, chain, 80002, "chain-events:80002", 0, 1) == 0
+
+    asyncio.run(run())
+
+
+def test_event_indexer_reconciles_dispute_lifecycle():
+    async def run() -> None:
+        chain = FixtureChainClient(80002)
+        store = MemoryStore()
+        await store.create_bounty({"contract_bounty_id": BOUNTY_ID, "repository": "owner/repository", "status": "verdict_submitted"})
+        await store.create_dispute({"bounty_id": BOUNTY_ID, "status": "transaction_prepared", "evidence_cid": CID})
+
+        await chain.confirm_open_dispute(BOUNTY_ID, CID, "0x" + "55" * 32)
+        await chain.confirm_dispute_resolution(BOUNTY_ID, 1, "0x" + "66" * 32)
+
+        assert await sync_chain_events(store, chain, 80002, "chain-events:disputes", 0, 1) == 4
+        dispute = await store.get_dispute(BOUNTY_ID)
+        assert dispute["status"] == "resolved"
+        assert dispute["resolution"] == 1
+        assert (await store.get_bounty(BOUNTY_ID))["status"] == "paid_out"
 
     asyncio.run(run())

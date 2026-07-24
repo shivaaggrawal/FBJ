@@ -143,3 +143,42 @@ def test_wallet_preparation_endpoints_return_unsigned_actions():
 
     assert client.post(f"/api/bounties/{bounty_id}/cancel/prepare").json()["transaction"]["operation"] == "cancel_open_bounty"
     assert client.post(f"/api/bounties/{bounty_id}/refund/prepare").json()["transaction"]["operation"] == "refund_expired_bounty"
+
+
+def test_wallet_action_confirmations_persist_dispute_and_bounty_states():
+    bounty_id = "0x" + "fa" * 32
+    bounty = client.post("/api/bounties", json={"contract_bounty_id": bounty_id, "repository": "owner/confirmation-demo",
+        "issue_url": "https://github.com/owner/confirmation-demo/issues/1", "reward_token": "0x" + "12" * 20,
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600})
+    assert bounty.status_code == 201
+
+    prepared = client.post(f"/api/bounties/{bounty_id}/disputes/prepare", json={"evidence": {"reason": "verify confirmation"}})
+    assert prepared.status_code == 200
+    dispute_hash = "0x" + "11" * 32
+    opened = client.post(f"/api/bounties/{bounty_id}/disputes/confirm", json={"transaction_hash": dispute_hash})
+    assert opened.status_code == 200
+    assert opened.json()["status"] == "confirmed"
+    assert client.get(f"/api/bounties/{bounty_id}/dispute").json()["chain"]["open"] is True
+    assert client.get(f"/api/bounties/{bounty_id}").json()["status"] == "challenged"
+
+    resolution = client.post(f"/api/bounties/{bounty_id}/disputes/resolve/confirm", json={"resolution": 2, "transaction_hash": "0x" + "22" * 32})
+    assert resolution.status_code == 200
+    assert resolution.json()["status"] == "confirmed"
+    assert client.get(f"/api/bounties/{bounty_id}").json()["status"] == "refunded"
+    assert client.get(f"/api/transactions/{dispute_hash}").json()["status"] == "confirmed"
+
+    cancelled_bounty = "0x" + "fb" * 32
+    assert client.post("/api/bounties", json={"contract_bounty_id": cancelled_bounty, "repository": "owner/cancel-demo",
+        "issue_url": "https://github.com/owner/cancel-demo/issues/1", "reward_token": "0x" + "12" * 20,
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600}).status_code == 201
+    cancelled = client.post(f"/api/bounties/{cancelled_bounty}/cancel/confirm", json={"transaction_hash": "0x" + "33" * 32})
+    assert cancelled.json()["status"] == "confirmed"
+    assert client.get(f"/api/bounties/{cancelled_bounty}").json()["status"] == "cancelled"
+
+    refunded_bounty = "0x" + "fc" * 32
+    assert client.post("/api/bounties", json={"contract_bounty_id": refunded_bounty, "repository": "owner/refund-demo",
+        "issue_url": "https://github.com/owner/refund-demo/issues/1", "reward_token": "0x" + "12" * 20,
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600}).status_code == 201
+    refunded = client.post(f"/api/bounties/{refunded_bounty}/refund/confirm", json={"transaction_hash": "0x" + "44" * 32})
+    assert refunded.json()["status"] == "confirmed"
+    assert client.get(f"/api/bounties/{refunded_bounty}").json()["status"] == "refunded"

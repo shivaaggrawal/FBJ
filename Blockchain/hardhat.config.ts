@@ -1,6 +1,10 @@
-import "dotenv/config";
+import { config as loadEnvironment } from "dotenv";
+import { fileURLToPath } from "node:url";
 import hardhatToolboxMochaEthers from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
 import { defineConfig } from "hardhat/config";
+
+// All applications and scripts use the single repository-root .env file.
+loadEnvironment({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
 
 const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
 const amoyRpcUrl = process.env.AMOY_RPC_URL;

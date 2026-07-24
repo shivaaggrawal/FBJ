@@ -187,6 +187,14 @@ class DisputeResolutionRequest(BaseModel):
     resolution: int = Field(ge=1, le=2, description="1 pays the recipient; 2 refunds the maintainer.")
 
 
+class TransactionHashRequest(BaseModel):
+    transaction_hash: str = Field(pattern=r"^0x[0-9a-fA-F]{64}$")
+
+
+class DisputeResolutionConfirmationRequest(DisputeResolutionRequest, TransactionHashRequest):
+    pass
+
+
 class WalletTransactionResponse(BaseModel):
     operation: str
     transaction: dict[str, Any]
@@ -199,3 +207,5 @@ class TransactionResponse(BaseModel):
     transaction_hash: str
     network: str
     status: str
+    block_number: int | None = None
+    error: str | None = None

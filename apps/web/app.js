@@ -124,12 +124,21 @@ async function createBounty(event) {
   } catch (error) { notice(error.message, true); }
 }
 
-async function prepareAndSend(path, body) {
+async function prepareAndSend(path, body, confirmationPath = null, confirmationBody = {}) {
   if (!state.selected) throw new Error("Select a bounty first.");
   const prepared = await api(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
   const hash = await sendWalletTransaction(prepared.transaction);
-  notice(`Wallet transaction submitted: ${short(hash, 18)}`);
-  return hash;
+  notice(`Wallet transaction submitted: ${short(hash, 18)}. Waiting for confirmation...`);
+  await waitForReceipt(hash);
+  if (confirmationPath) {
+    const confirmed = await api(confirmationPath, { method: "POST", body: JSON.stringify({ ...confirmationBody, transaction_hash: hash }) });
+    if (confirmed.status === "failed") throw new Error(confirmed.error || "Wallet transaction reverted.");
+    notice(`Transaction ${confirmed.status}: ${short(hash, 18)}`);
+    await loadBounties();
+    return confirmed;
+  }
+  notice(`Transaction confirmed: ${short(hash, 18)}`);
+  return { transaction_hash: hash, status: "confirmed" };
 }
 
 async function loadDisputes() {
@@ -148,10 +157,10 @@ $("#refresh-bounties").addEventListener("click", () => loadBounties().catch((err
 $("#refresh-disputes").addEventListener("click", () => loadDisputes().catch((error) => notice(error.message, true)));
 $("#create-bounty-form").addEventListener("submit", createBounty);
 $("#release-bounty").addEventListener("click", async () => { try { const result = await api(`/api/bounties/${state.selected.contract_bounty_id}/release`, { method: "POST" }); notice(`Release submitted: ${short(result.transaction_hash, 18)}`); } catch (error) { notice(error.message, true); } });
-$("#cancel-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/cancel/prepare`).catch((error) => notice(error.message, true)));
-$("#refund-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/refund/prepare`).catch((error) => notice(error.message, true)));
-$("#open-dispute-form").addEventListener("submit", async (event) => { event.preventDefault(); try { const evidence = JSON.parse(new FormData(event.currentTarget).get("evidence")); await prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/disputes/prepare`, { evidence }); notice("Dispute transaction prepared and submitted."); await loadDisputes(); } catch (error) { notice(error.message, true); } });
-document.querySelectorAll("[data-resolution]").forEach((button) => button.addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/disputes/resolve/prepare`, { resolution: Number(button.dataset.resolution) }).catch((error) => notice(error.message, true))));
+$("#cancel-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/cancel/prepare`, null, `/api/bounties/${state.selected.contract_bounty_id}/cancel/confirm`).catch((error) => notice(error.message, true)));
+$("#refund-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/refund/prepare`, null, `/api/bounties/${state.selected.contract_bounty_id}/refund/confirm`).catch((error) => notice(error.message, true)));
+$("#open-dispute-form").addEventListener("submit", async (event) => { event.preventDefault(); try { const evidence = JSON.parse(new FormData(event.currentTarget).get("evidence")); await prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/disputes/prepare`, { evidence }, `/api/bounties/${state.selected.contract_bounty_id}/disputes/confirm`); await loadDisputes(); } catch (error) { notice(error.message, true); } });
+document.querySelectorAll("[data-resolution]").forEach((button) => button.addEventListener("click", () => { const resolution = Number(button.dataset.resolution); return prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/disputes/resolve/prepare`, { resolution }, `/api/bounties/${state.selected.contract_bounty_id}/disputes/resolve/confirm`, { resolution }).catch((error) => notice(error.message, true)); }));
 document.querySelectorAll(".nav-link").forEach((link) => link.addEventListener("click", () => setView(link.dataset.view)));
 
 const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); expiry.setMinutes(expiry.getMinutes() - expiry.getTimezoneOffset());

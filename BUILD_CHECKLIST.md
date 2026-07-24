@@ -28,7 +28,7 @@ The blockchain implementation in `Blockchain/` is substantially complete and ver
 
 ## 2. Blockchain — remaining integration work
 
-- [ ] Create `Blockchain/.env` locally from `.env.example`; never commit it.
+- [ ] Create the repository-root `.env` locally from `.env.example`; never commit it. This single file is used by both the API and Hardhat.
 - [ ] Fund deployment and relayer wallets with Amoy POL for gas.
 - [ ] Deploy or choose a test ERC-20 reward token on Amoy.
 - [ ] Set `AMOY_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `DEFAULT_REWARD_TOKEN`, `RELAYER_ADDRESS`, and `DISPUTE_RESOLVER_ADDRESS`.

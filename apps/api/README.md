@@ -5,12 +5,16 @@ The API provides a FastAPI health endpoint, signed GitHub webhook ingress, deter
 ## Run locally
 
 ```powershell
-cd apps/api
-python -m pip install -r requirements.txt
+# From the repository root. Requires the Windows Python 3.10 launcher.
+.\apps\api\scripts\setup-dev.ps1
 Copy-Item .env.example .env
-python -m uvicorn app.main:app --reload
-python -m pytest
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --app-dir apps\api
+
+# Run the pinned test environment.
+.\apps\api\scripts\setup-dev.ps1 -RunTests
 ```
+
+`setup-dev.ps1` always uses an isolated repository-root `.venv` with Python 3.10 and installs the exact versions in `requirements.txt`. The repository-root `.env` is the only environment file used by the API and Hardhat; do not commit it.
 
 Fixture review is available at `POST /api/reviews/fixture` only when `FIXTURE_MODE=true`. It uses deterministic review output, an in-process IPFS-compatible CID, and a fixture chain client, so the entire evidence-to-verdict path can be exercised without credentials.
 
@@ -40,7 +44,11 @@ Core endpoints:
 - `POST /api/bounties/{contract_bounty_id}/release` calls `BountyEscrow.releaseBounty` after the contract's challenge window has passed.
 - `POST /api/bounties/prepare` returns the ERC-20 approval and `createBounty` wallet transactions.
 - `POST /api/bounties/{contract_bounty_id}/disputes/prepare` pins and verifies dispute evidence, then returns an `openDispute` wallet transaction.
-- `POST /api/bounties/{contract_bounty_id}/disputes/resolve/prepare`, `/cancel/prepare`, and `/refund/prepare` return role-checked wallet transactions.
+- `POST /api/bounties/{contract_bounty_id}/disputes/confirm`, `/disputes/resolve/confirm`, `/cancel/confirm`, and `/refund/confirm` verify wallet-signed receipts, persist the transaction hash/status, and update local lifecycle state.
+- `GET /api/bounties/{contract_bounty_id}/dispute` returns both the persisted dispute record and `DisputeManager.getDispute` state; `GET /api/transactions/{transaction_hash}` reports pending, confirmed, or failed receipt status.
+- `POST /api/bounties/{contract_bounty_id}/disputes/resolve` broadcasts a resolver-authorized decision only when `DISPUTE_RESOLVER_PRIVATE_KEY` is configured. `POST /api/bounties/{contract_bounty_id}/refund` broadcasts an expired-bounty refund from the service wallet.
+
+Maintainer/recipient actions (`openDispute` and `cancelOpenBounty`) remain wallet-signed: the API never holds those private keys. The dashboard waits for a wallet receipt and then calls the matching `/confirm` endpoint. Chain event indexing also reconciles `DisputeOpened` and `DisputeResolved` events into the local record for transactions submitted outside the dashboard.
 
 Set `FIXTURE_MODE=false`, `DATABASE_MODE=mongodb`, `IPFS_PROVIDER=pinata`, and the deployment values in `.env` to enable the real Amoy + Pinata flow. The relayer private key must only hold `RELAYER_ROLE`; review code must never receive it.
 
@@ -50,7 +58,7 @@ The attestation endpoint never accepts a payout address from its caller. It uses
 
 The API deliberately does not hold a maintainer private key. A maintainer wallet must approve the ERC-20 and call `BountyEscrow.createBounty`; the API then verifies the confirmed transaction, the `BountyCreated` event, the escrow fields, and a wallet signature before it saves the GitHub mapping.
 
-1. Set the deployed Amoy addresses and `FIXTURE_MODE=false` in `apps/api/.env`, then start MongoDB and the API.
+1. Set the deployed Amoy addresses and `FIXTURE_MODE=false` in the repository-root `.env`, then start MongoDB and the API.
 2. From `Blockchain/`, set the same escrow address and the maintainer wallet in its local `.env`, then run `npm.cmd run bounty:create -- <escrow> <token-or-zero-address> <bounty-id> <token-smallest-unit-amount> <expiry-unix>`.
 3. Submit the creation metadata, transaction hash, and maintainer signature to `POST /api/bounties`. Request `POST /api/bounties/registration-message` with the same payload first to obtain the exact message to sign with `personal_sign`.
 

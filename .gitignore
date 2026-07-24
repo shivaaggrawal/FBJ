@@ -1,6 +1,13 @@
+# Python runtime and test artifacts
 .pytest_cache/
 __pycache__/
 *.py[cod]
 .venv/
+
+# Local configuration (commit only sanitized example files)
 .env
+.env.*
+!.env.example
+
+# JavaScript dependencies
 node_modules/

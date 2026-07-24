@@ -40,6 +40,33 @@ async def _apply_event(store: Store, event: dict) -> None:
         values["status"] = status
     await store.update_bounty(bounty_id, values)
 
+    args = event.get("args", {})
+    if name == "DisputeOpened":
+        dispute_values = {
+            "status": "opened",
+            "transaction_hash": event["transaction_hash"],
+            "transaction_status": "confirmed",
+            "challenger": args.get("challenger"),
+            "evidence_cid": args.get("evidenceCid", args.get("evidence_cid")),
+        }
+        opened_at = args.get("openedAt", args.get("opened_at"))
+        if opened_at is not None:
+            dispute_values["opened_at"] = opened_at
+        if await store.get_dispute(bounty_id) is None:
+            await store.create_dispute({"bounty_id": bounty_id, "source": "chain", **dispute_values})
+        else:
+            await store.update_dispute(bounty_id, dispute_values)
+    elif name == "DisputeResolved":
+        dispute = await store.get_dispute(bounty_id)
+        if dispute is not None:
+            await store.update_dispute(bounty_id, {
+                "status": "resolved",
+                "resolution": args.get("resolution"),
+                "resolution_tx_hash": event["transaction_hash"],
+                "resolution_transaction_status": "confirmed",
+                "resolver": args.get("resolver"),
+            })
+
 
 async def sync_chain_events(
     store: Store, chain: ChainClient, chain_id: int, cursor_name: str, from_block: int, to_block: int

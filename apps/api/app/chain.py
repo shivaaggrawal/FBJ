@@ -47,6 +47,11 @@ class ChainClient:
     async def prepare_cancel_open_bounty(self, bounty_id: str) -> dict[str, Any]: ...
     async def prepare_refund_expired_bounty(self, bounty_id: str) -> dict[str, Any]: ...
     async def prepare_dispute_resolution(self, bounty_id: str, resolution: int) -> dict[str, Any]: ...
+    async def confirm_open_dispute(self, bounty_id: str, evidence_cid: str, transaction_hash: str) -> dict[str, Any]: ...
+    async def confirm_dispute_resolution(self, bounty_id: str, resolution: int, transaction_hash: str) -> dict[str, Any]: ...
+    async def confirm_cancel_open_bounty(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]: ...
+    async def confirm_refund_expired_bounty(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]: ...
+    async def get_transaction_status(self, transaction_hash: str) -> dict[str, Any]: ...
     async def submit_verdict(self, bounty_id: str, evidence_hash: str, evidence_cid: str, recipient: str, final_score_bps: int) -> dict[str, Any]: ...
     async def release_bounty(self, bounty_id: str) -> dict[str, Any]: ...
     async def resolve_dispute(self, bounty_id: str, resolution: int) -> dict[str, Any]: ...
@@ -73,10 +78,22 @@ class FixtureChainClient(ChainClient):
         self._bounties: dict[str, dict[str, Any]] = {}
         self._verdicts: dict[str, dict[str, Any]] = {}
         self._released: set[str] = set()
+        self._disputes: dict[str, dict[str, Any]] = {}
+        self._transaction_statuses: dict[str, dict[str, Any]] = {}
         self._events: list[dict[str, Any]] = []
 
     def _wallet_transaction(self, operation: str) -> dict[str, Any]:
         return {"operation": operation, "chain_id": self._chain_id, "to": "fixture", "data": "fixture", "value": "0x0"}
+
+    def _confirmed_transaction(self, transaction_hash: str) -> dict[str, Any]:
+        if not isinstance(transaction_hash, str) or not transaction_hash.startswith("0x") or len(transaction_hash) != 66:
+            raise ChainError("transaction hash is invalid")
+        result = {"transaction_hash": transaction_hash.lower(), "network": f"fixture-{self._chain_id}", "status": "confirmed", "block_number": 1}
+        self._transaction_statuses[transaction_hash.lower()] = result
+        return result
+
+    def _append_event(self, name: str, contract: str, transaction_hash: str, args: dict[str, Any]) -> None:
+        self._events.append({"event": name, "contract": contract, "block_number": 1, "transaction_hash": transaction_hash, "log_index": len(self._events), "args": args})
 
     async def prepare_bounty_creation(self, bounty_id: str, token: str, amount: int, expires_at: int) -> dict[str, Any]:
         _bytes32(bounty_id, "bounty_id")
@@ -124,7 +141,7 @@ class FixtureChainClient(ChainClient):
         transaction_hash = "0x" + hashlib.sha256(f"verdict:{bounty_id}:{evidence_hash}:{evidence_cid}:{recipient}:{final_score_bps}".encode()).hexdigest()
         verdict = {"bounty_id": bounty_id, "evidence_hash": evidence_hash, "evidence_cid": evidence_cid, "recipient": recipient, "final_score_bps": final_score_bps, "exists": True}
         self._verdicts[bounty_id] = verdict
-        self._events.append({"event": "VerdictSubmitted", "contract": "verdict_registry", "block_number": 1, "transaction_hash": transaction_hash, "log_index": len(self._events), "args": verdict})
+        self._append_event("VerdictSubmitted", "verdict_registry", transaction_hash, verdict)
         return {"transaction_hash": transaction_hash, "network": f"fixture-{self._chain_id}", "status": "confirmed", "verdict": verdict}
 
     async def release_bounty(self, bounty_id: str) -> dict[str, Any]:
@@ -134,16 +151,51 @@ class FixtureChainClient(ChainClient):
             raise ChainError("Bounty has already been released")
         self._released.add(bounty_id)
         transaction_hash = "0x" + hashlib.sha256(f"release:{bounty_id}".encode()).hexdigest()
-        self._events.append({"event": "BountyPaid", "contract": "bounty_escrow", "block_number": 1, "transaction_hash": transaction_hash, "log_index": len(self._events), "args": {"bounty_id": bounty_id}})
+        self._append_event("BountyPaid", "bounty_escrow", transaction_hash, {"bounty_id": bounty_id})
         return {"transaction_hash": transaction_hash, "network": f"fixture-{self._chain_id}", "status": "confirmed"}
 
-    async def resolve_dispute(self, bounty_id: str, resolution: int) -> dict[str, Any]:
+    async def confirm_open_dispute(self, bounty_id: str, evidence_cid: str, transaction_hash: str) -> dict[str, Any]:
+        await self.prepare_open_dispute(bounty_id, evidence_cid)
+        if bounty_id in self._disputes:
+            raise ChainError("A dispute has already been opened for this bounty")
+        result = self._confirmed_transaction(transaction_hash)
+        dispute = {"challenger": "fixture-wallet", "evidence_cid": evidence_cid, "opened_at": 1, "open": True, "resolution": 0}
+        self._disputes[bounty_id] = dispute
+        self._append_event("BountyChallenged", "bounty_escrow", transaction_hash, {"bounty_id": bounty_id})
+        self._append_event("DisputeOpened", "dispute_manager", transaction_hash, {"bounty_id": bounty_id, **dispute})
+        return result
+
+    async def confirm_dispute_resolution(self, bounty_id: str, resolution: int, transaction_hash: str) -> dict[str, Any]:
         await self.prepare_dispute_resolution(bounty_id, resolution)
-        return {"transaction_hash": "0x" + hashlib.sha256(f"resolve:{bounty_id}:{resolution}".encode()).hexdigest(), "network": f"fixture-{self._chain_id}", "status": "confirmed"}
+        dispute = self._disputes.get(bounty_id)
+        if dispute is None or not dispute["open"]:
+            raise ChainError("No open dispute exists for this bounty")
+        result = self._confirmed_transaction(transaction_hash)
+        dispute["open"] = False
+        dispute["resolution"] = resolution
+        self._append_event("BountyPaid" if resolution == 1 else "BountyRefunded", "bounty_escrow", transaction_hash, {"bounty_id": bounty_id, "status": 7})
+        self._append_event("DisputeResolved", "dispute_manager", transaction_hash, {"bounty_id": bounty_id, "resolution": resolution, "resolver": "fixture-resolver"})
+        return result
+
+    async def confirm_cancel_open_bounty(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]:
+        await self.prepare_cancel_open_bounty(bounty_id)
+        result = self._confirmed_transaction(transaction_hash)
+        self._append_event("BountyRefunded", "bounty_escrow", transaction_hash, {"bounty_id": bounty_id, "status": 6})
+        return result
+
+    async def confirm_refund_expired_bounty(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]:
+        await self.prepare_refund_expired_bounty(bounty_id)
+        result = self._confirmed_transaction(transaction_hash)
+        self._append_event("BountyRefunded", "bounty_escrow", transaction_hash, {"bounty_id": bounty_id, "status": 7})
+        return result
+
+    async def resolve_dispute(self, bounty_id: str, resolution: int) -> dict[str, Any]:
+        transaction_hash = "0x" + hashlib.sha256(f"resolve:{bounty_id}:{resolution}".encode()).hexdigest()
+        return await self.confirm_dispute_resolution(bounty_id, resolution, transaction_hash)
 
     async def refund_expired_bounty(self, bounty_id: str) -> dict[str, Any]:
-        _bytes32(bounty_id, "bounty_id")
-        return {"transaction_hash": "0x" + hashlib.sha256(f"refund:{bounty_id}".encode()).hexdigest(), "network": f"fixture-{self._chain_id}", "status": "confirmed"}
+        transaction_hash = "0x" + hashlib.sha256(f"refund:{bounty_id}".encode()).hexdigest()
+        return await self.confirm_refund_expired_bounty(bounty_id, transaction_hash)
 
     async def get_bounty(self, bounty_id: str) -> dict[str, Any]:
         if bounty_id in self._bounties:
@@ -155,7 +207,15 @@ class FixtureChainClient(ChainClient):
 
     async def get_dispute(self, bounty_id: str) -> dict[str, Any]:
         _bytes32(bounty_id, "bounty_id")
-        return {"challenger": "0x0000000000000000000000000000000000000000", "evidence_cid": "", "opened_at": 0, "open": False, "resolution": 0}
+        return self._disputes.get(bounty_id, {"challenger": "0x0000000000000000000000000000000000000000", "evidence_cid": "", "opened_at": 0, "open": False, "resolution": 0})
+
+    async def get_transaction_status(self, transaction_hash: str) -> dict[str, Any]:
+        result = self._transaction_statuses.get(transaction_hash.lower())
+        if result is not None:
+            return result
+        if not isinstance(transaction_hash, str) or not transaction_hash.startswith("0x") or len(transaction_hash) != 66:
+            raise ChainError("transaction hash is invalid")
+        return {"transaction_hash": transaction_hash.lower(), "network": f"fixture-{self._chain_id}", "status": "pending"}
 
     async def get_latest_block(self) -> int:
         return 1
@@ -185,17 +245,51 @@ class Web3ChainClient(ChainClient):
         self._disputes = self._web3.eth.contract(address=self._web3.to_checksum_address(settings.dispute_manager_address), abi=DISPUTE_MANAGER_ABI)
 
     def _transact(self, call: Any, account: Any | None = None) -> dict[str, Any]:
-        sender = account or self._account
-        nonce = self._web3.eth.get_transaction_count(sender.address, "pending")
-        transaction = call.build_transaction({"from": sender.address, "nonce": nonce, "chainId": self._chain_id, "gasPrice": self._web3.eth.gas_price})
-        transaction["gas"] = self._web3.eth.estimate_gas(transaction)
-        signed = sender.sign_transaction(transaction)
-        raw_transaction = getattr(signed, "raw_transaction", getattr(signed, "rawTransaction", None))
-        transaction_hash = self._web3.eth.send_raw_transaction(raw_transaction)
-        receipt = self._web3.eth.wait_for_transaction_receipt(transaction_hash, timeout=120)
+        try:
+            sender = account or self._account
+            nonce = self._web3.eth.get_transaction_count(sender.address, "pending")
+            transaction = call.build_transaction({"from": sender.address, "nonce": nonce, "chainId": self._chain_id, "gasPrice": self._web3.eth.gas_price})
+            transaction["gas"] = self._web3.eth.estimate_gas(transaction)
+            signed = sender.sign_transaction(transaction)
+            raw_transaction = getattr(signed, "raw_transaction", getattr(signed, "rawTransaction", None))
+            transaction_hash = self._web3.eth.send_raw_transaction(raw_transaction)
+            receipt = self._web3.eth.wait_for_transaction_receipt(transaction_hash, timeout=120)
+        except Exception as exc:
+            raise ChainError("Could not submit or confirm the EVM transaction") from exc
         if receipt.status != 1:
             raise ChainError("EVM transaction reverted")
         return {"transaction_hash": transaction_hash.hex(), "network": str(self._chain_id), "status": "confirmed", "block_number": receipt.blockNumber}
+
+    def _receipt_status(self, transaction_hash: str) -> tuple[dict[str, Any], Any | None]:
+        if not isinstance(transaction_hash, str) or not transaction_hash.startswith("0x") or len(transaction_hash) != 66:
+            raise ChainError("transaction hash is invalid")
+        try:
+            receipt = self._web3.eth.get_transaction_receipt(transaction_hash)
+        except Exception as exc:
+            if exc.__class__.__name__ == "TransactionNotFound":
+                return ({"transaction_hash": transaction_hash.lower(), "network": str(self._chain_id), "status": "pending"}, None)
+            raise ChainError("Could not retrieve the EVM transaction receipt") from exc
+        if receipt is None:
+            return ({"transaction_hash": transaction_hash.lower(), "network": str(self._chain_id), "status": "pending"}, None)
+        if receipt.status != 1:
+            return ({"transaction_hash": receipt.transactionHash.hex(), "network": str(self._chain_id), "status": "failed", "error": "EVM transaction reverted", "block_number": receipt.blockNumber}, receipt)
+        return ({"transaction_hash": receipt.transactionHash.hex(), "network": str(self._chain_id), "status": "confirmed", "block_number": receipt.blockNumber}, receipt)
+
+    def _confirmed_event(self, contract: Any, event_name: str, bounty_id: str, receipt: Any, expected: dict[str, Any] | None = None) -> None:
+        if not receipt.to or receipt.to.lower() != contract.address.lower():
+            raise ChainError("transaction was sent to the wrong contract")
+        try:
+            events = getattr(contract.events, event_name)().process_receipt(receipt)
+        except Exception as exc:
+            raise ChainError(f"transaction did not emit a readable {event_name} event") from exc
+        bounty_id_bytes = _bytes32(bounty_id, "bounty_id")
+        for event in events:
+            args = event["args"]
+            if args.get("bountyId") != bounty_id_bytes:
+                continue
+            if all(args.get(key) == value for key, value in (expected or {}).items()):
+                return
+        raise ChainError(f"transaction did not emit the expected {event_name} event")
 
     def _wallet_transaction(self, contract: Any, function: str, arguments: list[Any]) -> dict[str, Any]:
         return {"to": contract.address, "data": contract.encode_abi(function, args=arguments), "value": "0x0", "chain_id": self._chain_id}
@@ -228,6 +322,36 @@ class Web3ChainClient(ChainClient):
         if resolution not in {1, 2}:
             raise ChainError("resolution must be 1 (pay recipient) or 2 (refund maintainer)")
         return self._wallet_transaction(self._disputes, "resolveDispute", [_bytes32(bounty_id, "bounty_id"), resolution])
+
+    async def confirm_open_dispute(self, bounty_id: str, evidence_cid: str, transaction_hash: str) -> dict[str, Any]:
+        status, receipt = self._receipt_status(transaction_hash)
+        if receipt is None or status["status"] != "confirmed":
+            return status
+        self._confirmed_event(self._disputes, "DisputeOpened", bounty_id, receipt, {"evidenceCid": evidence_cid})
+        return status
+
+    async def confirm_dispute_resolution(self, bounty_id: str, resolution: int, transaction_hash: str) -> dict[str, Any]:
+        if resolution not in {1, 2}:
+            raise ChainError("resolution must be 1 (pay recipient) or 2 (refund maintainer)")
+        status, receipt = self._receipt_status(transaction_hash)
+        if receipt is None or status["status"] != "confirmed":
+            return status
+        self._confirmed_event(self._disputes, "DisputeResolved", bounty_id, receipt, {"resolution": resolution})
+        return status
+
+    async def confirm_cancel_open_bounty(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]:
+        status, receipt = self._receipt_status(transaction_hash)
+        if receipt is None or status["status"] != "confirmed":
+            return status
+        self._confirmed_event(self._escrow, "BountyRefunded", bounty_id, receipt, {"status": 6})
+        return status
+
+    async def confirm_refund_expired_bounty(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]:
+        status, receipt = self._receipt_status(transaction_hash)
+        if receipt is None or status["status"] != "confirmed":
+            return status
+        self._confirmed_event(self._escrow, "BountyRefunded", bounty_id, receipt, {"status": 7})
+        return status
 
     async def verify_bounty_creation(self, bounty_id: str, transaction_hash: str) -> dict[str, Any]:
         _bytes32(bounty_id, "bounty_id")
@@ -285,6 +409,10 @@ class Web3ChainClient(ChainClient):
         values = self._disputes.functions.getDispute(_bytes32(bounty_id, "bounty_id")).call()
         keys = ("challenger", "evidence_cid", "opened_at", "open", "resolution")
         return dict(zip(keys, values, strict=True))
+
+    async def get_transaction_status(self, transaction_hash: str) -> dict[str, Any]:
+        status, _ = self._receipt_status(transaction_hash)
+        return status
 
     async def get_latest_block(self) -> int:
         return self._web3.eth.block_number
