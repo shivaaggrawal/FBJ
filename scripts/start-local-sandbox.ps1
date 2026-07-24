@@ -86,11 +86,50 @@ function Test-ApiReady {
   }
 }
 
+function Stop-PidFileProcess {
+  param([string]$Path)
+  if (-not (Test-Path $Path)) { return }
+  $processId = Get-Content -LiteralPath $Path | Select-Object -First 1
+  if (-not $processId) { return }
+  $process = Get-Process -Id ([int]$processId) -ErrorAction SilentlyContinue
+  if ($process) {
+    Stop-Process -Id $process.Id -Force
+    Start-Sleep -Milliseconds 500
+  }
+  Remove-Item -LiteralPath $Path -Force
+}
+
+function Stop-LocalPortProcess {
+  param([int]$Port)
+  $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+  $seen = @{}
+  foreach ($connection in $connections) {
+    $seen[[string]$connection.OwningProcess] = $true
+    $process = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
+    if ($process) {
+      Stop-Process -Id $process.Id -Force
+      Start-Sleep -Milliseconds 500
+    }
+  }
+  $netstatRows = netstat -ano | Select-String ":$Port\s+.*LISTENING"
+  foreach ($row in $netstatRows) {
+    $parts = ($row.Line -replace "^\s+", "") -split "\s+"
+    $processId = $parts[-1]
+    if ($processId -eq "0" -or $seen.ContainsKey($processId)) { continue }
+    $process = Get-Process -Id ([int]$processId) -ErrorAction SilentlyContinue
+    if ($process) {
+      Stop-Process -Id $process.Id -Force
+      Start-Sleep -Milliseconds 500
+    }
+  }
+}
+
 New-Item -ItemType Directory -Force -Path $Sandbox | Out-Null
 
 if (-not (Test-RpcReady)) {
-  $nodeCommand = "cd /d `"$Blockchain`" && npm.cmd exec -- hardhat node"
-  $nodeProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/k",$nodeCommand -WindowStyle Minimized -PassThru
+  Stop-PidFileProcess $PidPath
+  Stop-LocalPortProcess 8545
+  $nodeProcess = Start-Process -FilePath "npm.cmd" -ArgumentList @("exec", "--", "hardhat", "node") -WorkingDirectory $Blockchain -WindowStyle Hidden -RedirectStandardOutput $NodeLog -RedirectStandardError $NodeErrorLog -PassThru
   Set-Content -LiteralPath $PidPath -Value $nodeProcess.Id
   for ($attempt = 0; $attempt -lt 40; $attempt += 1) {
     if (Test-RpcReady) { break }
@@ -128,9 +167,11 @@ Set-EnvValue $LocalEnvPath "AI_PROVIDER" "fixture"
 Set-EnvValue $LocalEnvPath "GITHUB_WEBHOOK_SECRET" "local-sandbox-secret"
 
 if (-not $SkipApi) {
+  Stop-PidFileProcess $ApiPidPath
+  Stop-LocalPortProcess 8000
   $apiPython = Join-Path $Api ".venv\Scripts\python.exe"
-  $apiCommand = "set `"FBJ_ENV_FILE=$LocalEnvPath`" && cd /d `"$Api`" && `"$apiPython`" -m uvicorn app.main:app --port 8000"
-  $apiProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/k",$apiCommand -WindowStyle Minimized -PassThru
+  $apiEnv = "FBJ_ENV_FILE=$LocalEnvPath"
+  $apiProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "set `"$apiEnv`" && cd /d `"$Api`" && `"$apiPython`" -m uvicorn app.main:app --port 8000") -WindowStyle Hidden -RedirectStandardOutput $ApiLog -RedirectStandardError $ApiErrorLog -PassThru
   Set-Content -LiteralPath $ApiPidPath -Value $apiProcess.Id
   for ($attempt = 0; $attempt -lt 40; $attempt += 1) {
     if (Test-ApiReady) { break }

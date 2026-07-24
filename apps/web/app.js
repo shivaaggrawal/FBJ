@@ -1,8 +1,19 @@
 const state = { account: null, bounties: [], selected: null, config: null, filters: { search: "", status: "all" } };
+function apiErrorMessage(detail, fallback) {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      if (!item || typeof item !== "object") return String(item);
+      const field = Array.isArray(item.loc) ? item.loc.filter((part) => part !== "body").join(".") : "";
+      return field ? `${field}: ${item.msg || "Invalid value"}` : item.msg || "Invalid request";
+    }).join("; ");
+  }
+  return fallback;
+}
 const api = (path, options = {}) => fetch(path, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options })
   .then(async (response) => {
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.detail || `Request failed (${response.status})`);
+    if (!response.ok) throw new Error(apiErrorMessage(body.detail, `Request failed (${response.status})`));
     return body;
   });
 
@@ -28,16 +39,31 @@ async function connectWallet() {
   if (!window.ethereum) throw new Error("No browser wallet found. Install MetaMask or another EIP-1193 wallet.");
   if (!state.config) await loadClientConfig();
   const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-  const chainId = await window.ethereum.request({ method: "eth_chainId" });
   state.account = accounts[0];
   $("#connect-wallet").textContent = short(state.account, 12);
+  await ensureExpectedChain();
+}
+
+async function ensureExpectedChain() {
+  if (!window.ethereum) throw new Error("No browser wallet found. Install MetaMask or another EIP-1193 wallet.");
+  if (!state.config) await loadClientConfig();
+  const chainId = await window.ethereum.request({ method: "eth_chainId" });
   const expectedChain = state.config.chain_hex;
   $("#network-status").textContent = chainId === expectedChain ? state.config.chain_name : `Wrong network: ${chainId}`;
-  if (chainId !== expectedChain) notice(`Switch the wallet network to ${state.config.chain_name} before sending a transaction.`, true);
+  if (chainId === expectedChain) return;
+  try {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: expectedChain }] });
+  } catch (error) {
+    throw new Error(`Switch the wallet network to ${state.config.chain_name} before sending a transaction.`);
+  }
+  const switchedChain = await window.ethereum.request({ method: "eth_chainId" });
+  $("#network-status").textContent = switchedChain === expectedChain ? state.config.chain_name : `Wrong network: ${switchedChain}`;
+  if (switchedChain !== expectedChain) throw new Error(`Switch the wallet network to ${state.config.chain_name} before sending a transaction.`);
 }
 
 async function sendWalletTransaction(transaction) {
   if (!state.account) await connectWallet();
+  await ensureExpectedChain();
   if (transaction.to === "fixture") throw new Error("Fixture mode cannot send wallet transactions. Deploy the Amoy contracts first.");
   return window.ethereum.request({ method: "eth_sendTransaction", params: [{
     from: state.account,
@@ -144,9 +170,10 @@ async function selectBounty(id) {
 
 async function createBounty(event) {
   event.preventDefault();
+  const formElement = event.currentTarget;
   try {
     await connectWallet();
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     const payload = Object.fromEntries(form.entries());
     payload.contract_bounty_id = newBountyId();
     payload.maintainer_wallet = state.account;
@@ -163,7 +190,7 @@ async function createBounty(event) {
     payload.registration_signature = await window.ethereum.request({ method: "personal_sign", params: [message.message, state.account] });
     await api("/api/bounties", { method: "POST", body: JSON.stringify(payload) });
     notice("Bounty confirmed and registered.");
-    event.currentTarget.reset();
+    formElement.reset();
     await loadBounties();
   } catch (error) { notice(error.message, true); }
 }
@@ -205,9 +232,13 @@ $("#create-bounty-form").addEventListener("submit", createBounty);
 $("#release-bounty").addEventListener("click", async () => { try { const result = await api(`/api/bounties/${state.selected.contract_bounty_id}/release`, { method: "POST" }); notice(`Release submitted: ${short(result.transaction_hash, 18)}`); } catch (error) { notice(error.message, true); } });
 $("#cancel-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/cancel/prepare`, null, `/api/bounties/${state.selected.contract_bounty_id}/cancel/confirm`).catch((error) => notice(error.message, true)));
 $("#refund-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/refund/prepare`, null, `/api/bounties/${state.selected.contract_bounty_id}/refund/confirm`).catch((error) => notice(error.message, true)));
-$("#open-dispute-form").addEventListener("submit", async (event) => { event.preventDefault(); try { const evidence = JSON.parse(new FormData(event.currentTarget).get("evidence")); await prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/disputes/prepare`, { evidence }, `/api/bounties/${state.selected.contract_bounty_id}/disputes/confirm`); await loadDisputes(); } catch (error) { notice(error.message, true); } });
+$("#open-dispute-form").addEventListener("submit", async (event) => { event.preventDefault(); const formElement = event.currentTarget; try { const evidence = JSON.parse(new FormData(formElement).get("evidence")); await prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/disputes/prepare`, { evidence }, `/api/bounties/${state.selected.contract_bounty_id}/disputes/confirm`); await loadDisputes(); } catch (error) { notice(error.message, true); } });
 document.querySelectorAll("[data-resolution]").forEach((button) => button.addEventListener("click", () => { const resolution = Number(button.dataset.resolution); return prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/disputes/resolve/prepare`, { resolution }, `/api/bounties/${state.selected.contract_bounty_id}/disputes/resolve/confirm`, { resolution }).catch((error) => notice(error.message, true)); }));
 document.querySelectorAll(".nav-link").forEach((link) => link.addEventListener("click", () => setView(link.dataset.view)));
+if (window.ethereum) {
+  window.ethereum.on?.("chainChanged", () => connectWallet().catch((error) => notice(error.message, true)));
+  window.ethereum.on?.("accountsChanged", () => connectWallet().catch((error) => notice(error.message, true)));
+}
 
 const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); expiry.setMinutes(expiry.getMinutes() - expiry.getTimezoneOffset());
 $("[name=expires_at]").value = expiry.toISOString().slice(0, 16);
