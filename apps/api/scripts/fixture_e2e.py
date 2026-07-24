@@ -36,6 +36,7 @@ def main() -> None:
             "reward_token": "0x" + "12" * 20,
             "reward_amount": "1000000",
             "maintainer_wallet": "0x" + "34" * 20,
+            "recipient_wallet": "0x" + "56" * 20,
             "expires_at": int(time()) + 86_400,
             "challenge_seconds": 3600,
         }))

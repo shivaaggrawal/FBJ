@@ -48,6 +48,7 @@ def signed_bounty() -> BountyRegistrationRequest:
         reward_token="0x" + "12" * 20,
         reward_amount="1000000",
         maintainer_wallet=ACCOUNT.address,
+        recipient_wallet="0x" + "56" * 20,
         expires_at=1_900_000_000,
         challenge_seconds=3600,
         creation_tx_hash="0x" + "cd" * 32,

@@ -170,11 +170,8 @@ async function selectBounty(id) {
 
 async function createBounty(event) {
   event.preventDefault();
-<<<<<<< HEAD
-=======
   // Event.currentTarget is only set while the submit listener is running.
   // Keep the form before awaiting the wallet connection.
->>>>>>> 62c2f430da75cfba06366eae731abacee51d4773
   const formElement = event.currentTarget;
   try {
     await connectWallet();
@@ -183,7 +180,6 @@ async function createBounty(event) {
     payload.contract_bounty_id = newBountyId();
     payload.maintainer_wallet = state.account;
     payload.expires_at = Math.floor(new Date(payload.expires_at).getTime() / 1000);
-    if (!payload.recipient_wallet) delete payload.recipient_wallet;
     const prepared = await api("/api/bounties/prepare", { method: "POST", body: JSON.stringify(payload) });
     notice("Confirm ERC-20 approval in your wallet.");
     await waitForReceipt(await sendWalletTransaction(prepared.transaction.approval));

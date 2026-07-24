@@ -68,4 +68,3 @@ deployContract(name: 'MockUSDC', args: any[], signerOrOptions?: ethers.Signer | 
     ): Promise<ethers.Contract>;
   }
 }
-  
