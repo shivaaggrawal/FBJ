@@ -1,4 +1,4 @@
-const state = { account: null, bounties: [], selected: null, config: null, filters: { search: "", status: "all" } };
+const state = { account: null, bounties: [], selected: null, selectedChain: null, config: null, countdownTimer: null, filters: { search: "", status: "all" } };
 function apiErrorMessage(detail, fallback) {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
@@ -65,11 +65,16 @@ async function sendWalletTransaction(transaction) {
   if (!state.account) await connectWallet();
   await ensureExpectedChain();
   if (transaction.to === "fixture") throw new Error("Fixture mode cannot send wallet transactions. Deploy the Amoy contracts first.");
+  const quotedGasPrice = BigInt(await window.ethereum.request({ method: "eth_gasPrice" }));
+  // Use a legacy gas price with headroom. The configured Amoy RPC rejects
+  // MetaMask's EIP-1559 priority-fee proposal even when the transaction is valid.
+  const gasPrice = quotedGasPrice * 12n / 10n;
   return window.ethereum.request({ method: "eth_sendTransaction", params: [{
     from: state.account,
     to: transaction.to,
     data: transaction.data,
     value: transaction.value || "0x0",
+    gasPrice: `0x${gasPrice.toString(16)}`,
   }] });
 }
 
@@ -87,6 +92,65 @@ async function waitForReceipt(transactionHash) {
 
 function statusClass(status) {
   return status ? status.replaceAll("_", " ") : "unknown";
+}
+
+function validateBountyPayload(payload) {
+  const address = /^0x[0-9a-fA-F]{40}$/;
+  const bountyId = /^0x[0-9a-fA-F]{64}$/;
+  if (!bountyId.test(payload.contract_bounty_id)) throw new Error("Could not create a valid bounty ID. Please try again.");
+  if (!/^[^/\s]+\/[^/\s]+$/.test(payload.repository || "")) throw new Error("Repository must look like owner/repository.");
+  if (!/^https?:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+/i.test(payload.issue_url || "")) throw new Error("Issue URL must be a valid GitHub issue URL.");
+  if (!address.test(payload.reward_token || "")) throw new Error("Token address must be a valid 42-character wallet address.");
+  if (!address.test(payload.maintainer_wallet || "")) throw new Error("Connected maintainer wallet is invalid. Reconnect your wallet.");
+  if (!address.test(payload.recipient_wallet || "")) throw new Error("Recipient wallet must be a valid 42-character wallet address.");
+  if (!/^[1-9][0-9]*$/.test(payload.reward_amount || "")) throw new Error("Reward amount must be a positive whole number without commas.");
+  if (!Number.isInteger(Number(payload.expires_at)) || Number(payload.expires_at) <= Math.floor(Date.now() / 1000)) throw new Error("Expiry must be a future date and time.");
+}
+
+function normalizedStatus(value) { return String(value || "").toLowerCase(); }
+
+function setTransactionState(kind, title, message) {
+  const panel = $("#detail-state");
+  if (!panel) return;
+  panel.className = `state-banner ${kind || ""}`;
+  $("#state-title").textContent = title;
+  $("#state-message").textContent = message;
+}
+
+function setActionAvailability() {
+  if (!state.selected) return;
+  const status = normalizedStatus(state.selected.status);
+  const chain = state.selectedChain || {};
+  const disputeOpen = Boolean(chain.dispute?.open) || ["challenged", "disputed"].includes(status);
+  const settled = ["paid_out", "released", "resolved_release", "refunded", "cancelled"].includes(status);
+  const challengeEnds = Number(chain.verdict?.challenge_ends_at || chain.bounty?.release_at || 0);
+  const challengeOver = challengeEnds > 0 && Date.now() / 1000 >= challengeEnds;
+  const isParticipant = state.account && [state.selected.maintainer_wallet, state.selected.recipient_wallet].some((wallet) => normalizedStatus(wallet) === normalizedStatus(state.account));
+  $("#release-bounty").disabled = settled || disputeOpen || !challengeOver;
+  $("#cancel-bounty").disabled = settled || disputeOpen || !["open"].includes(status);
+  $("#refund-bounty").disabled = settled || disputeOpen || !["open", "expired"].includes(status) || (state.selected.expires_at && Date.now() / 1000 < Number(state.selected.expires_at));
+  $("#open-dispute-form button").disabled = settled || disputeOpen || !isParticipant;
+  document.querySelectorAll("[data-resolution]").forEach((button) => { button.disabled = !disputeOpen || settled; });
+}
+
+function renderChallengeWindow() {
+  const panel = $("#challenge-panel");
+  if (!panel || !state.selected) return;
+  const status = normalizedStatus(state.selected.status);
+  const chain = state.selectedChain || {};
+  const deadline = Number(chain.verdict?.challenge_ends_at || chain.bounty?.release_at || (status === "open" ? state.selected.expires_at : 0) || 0);
+  const countdown = $("#challenge-countdown");
+  const message = $("#challenge-message");
+  const title = $("#challenge-title");
+  if (["paid_out", "released", "resolved_release", "refunded", "cancelled"].includes(status)) { title.textContent = "Settlement complete"; message.textContent = "This bounty is closed and no further actions are available."; countdown.textContent = "CLOSED"; panel.classList.add("expired"); setActionAvailability(); return; }
+  const update = () => {
+    const remaining = deadline - Date.now() / 1000;
+    if (!deadline) { title.textContent = "Challenge window unavailable"; message.textContent = "Chain deadline will appear after a verdict is submitted."; countdown.textContent = "--:--:--"; panel.classList.remove("expired"); return; }
+    if (remaining <= 0) { title.textContent = "Challenge window closed"; message.textContent = "No open dispute detected. Release is available if the bounty is otherwise eligible."; countdown.textContent = "READY"; panel.classList.add("expired"); }
+    else { const days = Math.floor(remaining / 86400); const hours = Math.floor(remaining % 86400 / 3600); const minutes = Math.floor(remaining % 3600 / 60); const seconds = Math.floor(remaining % 60); title.textContent = status === "open" ? "Bounty expiry" : "Challenge window closes"; message.textContent = `Until ${new Date(deadline * 1000).toLocaleString()}`; countdown.textContent = `${days ? `${days}d ` : ""}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`; panel.classList.remove("expired"); }
+    setActionAvailability();
+  };
+  window.clearInterval(state.countdownTimer); update(); state.countdownTimer = window.setInterval(update, 1000);
 }
 
 function renderMetrics() {
@@ -148,6 +212,7 @@ function renderReview(review) {
 async function selectBounty(id) {
   state.selected = state.bounties.find((bounty) => bounty.contract_bounty_id === id);
   if (!state.selected) return;
+  state.selectedChain = null;
   $("#bounty-detail").classList.remove("hidden");
   $("#detail-title").textContent = short(id, 22);
   $("#detail-repository").textContent = state.selected.repository;
@@ -155,15 +220,27 @@ async function selectBounty(id) {
   issueLink.href = safeHref(state.selected.issue_url);
   issueLink.classList.toggle("disabled-link", issueLink.href === "#");
   $("#detail-status").textContent = statusClass(state.selected.status);
+  const initialStatus = normalizedStatus(state.selected.status);
+  setTransactionState(["challenged", "disputed"].includes(initialStatus) ? "disputed" : ["paid_out", "released", "resolved_release", "refunded", "cancelled"].includes(initialStatus) ? "settled" : "confirmed", initialStatus === "open" ? "Awaiting contribution" : statusClass(state.selected.status), initialStatus === "open" ? "Bounty is funded and ready for work." : "Loading the latest chain and review state...");
   $("#detail-facts").innerHTML = `<div class="fact"><b>Reward</b>${escapeHtml(state.selected.reward_amount)}</div><div class="fact"><b>Expiry</b>${escapeHtml(asDate(state.selected.expires_at))}</div><div class="fact"><b>Maintainer</b>${escapeHtml(short(state.selected.maintainer_wallet, 18))}</div><div class="fact"><b>Recipient</b>${escapeHtml(short(state.selected.recipient_wallet, 18))}</div>`;
+  setActionAvailability();
   $("#review-detail").innerHTML = '<p class="empty">Loading chain state...</p>';
   await loadBounties();
   try {
     const stateResponse = await api(`/api/bounties/${id}/chain-state`);
+    state.selectedChain = stateResponse;
     let review = null;
     if (state.selected.verdict_review_id) review = await api(`/api/reviews/${state.selected.verdict_review_id}`);
     $("#review-detail").innerHTML = `${renderReview(review)}<div class="facts"><div class="fact"><b>Chain bounty</b>${JSON.stringify(stateResponse.bounty).slice(0, 90)}</div><div class="fact"><b>Chain verdict</b>${stateResponse.verdict.exists ? "submitted" : "not submitted"}</div><div class="fact"><b>Dispute state</b>${stateResponse.dispute.open ? "open" : "none"}</div></div>`;
+    const isDisputed = Boolean(stateResponse.dispute.open) || ["challenged", "disputed"].includes(initialStatus);
+    const isSettled = ["paid_out", "released", "resolved_release", "refunded", "cancelled"].includes(initialStatus);
+    setTransactionState(isDisputed ? "disputed" : isSettled ? "settled" : "confirmed", isDisputed ? "Dispute open" : isSettled ? "Settlement confirmed" : "Chain state verified", isDisputed ? "Resolver action is required before funds can move." : isSettled ? "This bounty has reached a final state." : "Review, evidence, and permitted actions are shown below.");
+    renderChallengeWindow();
+    setActionAvailability();
   } catch (error) {
+    setTransactionState("failed", "Unable to verify chain state", error.message);
+    renderChallengeWindow();
+    setActionAvailability();
     $("#review-detail").innerHTML = `<p class="empty">${error.message}</p>`;
   }
 }
@@ -179,7 +256,9 @@ async function createBounty(event) {
     const payload = Object.fromEntries(form.entries());
     payload.contract_bounty_id = newBountyId();
     payload.maintainer_wallet = state.account;
+    payload.reward_amount = String(payload.reward_amount || "").replace(/[,_\s]/g, "");
     payload.expires_at = Math.floor(new Date(payload.expires_at).getTime() / 1000);
+    validateBountyPayload(payload);
     const prepared = await api("/api/bounties/prepare", { method: "POST", body: JSON.stringify(payload) });
     notice("Confirm ERC-20 approval in your wallet.");
     await waitForReceipt(await sendWalletTransaction(prepared.transaction.approval));
@@ -198,19 +277,28 @@ async function createBounty(event) {
 
 async function prepareAndSend(path, body, confirmationPath = null, confirmationBody = {}) {
   if (!state.selected) throw new Error("Select a bounty first.");
+  setTransactionState("pending", "Preparing transaction", "Waiting for the wallet to prepare this action...");
+  try {
   const prepared = await api(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
   const hash = await sendWalletTransaction(prepared.transaction);
+  setTransactionState("pending", "Transaction pending", `Waiting for confirmation: ${short(hash, 18)}`);
   notice(`Wallet transaction submitted: ${short(hash, 18)}. Waiting for confirmation...`);
   await waitForReceipt(hash);
   if (confirmationPath) {
     const confirmed = await api(confirmationPath, { method: "POST", body: JSON.stringify({ ...confirmationBody, transaction_hash: hash }) });
     if (confirmed.status === "failed") throw new Error(confirmed.error || "Wallet transaction reverted.");
+    setTransactionState("confirmed", "Transaction confirmed", `Action confirmed on-chain: ${short(hash, 18)}`);
     notice(`Transaction ${confirmed.status}: ${short(hash, 18)}`);
     await loadBounties();
     return confirmed;
   }
+  setTransactionState("confirmed", "Transaction confirmed", `Action confirmed on-chain: ${short(hash, 18)}`);
   notice(`Transaction confirmed: ${short(hash, 18)}`);
   return { transaction_hash: hash, status: "confirmed" };
+  } catch (error) {
+    setTransactionState("failed", "Transaction failed", error.message);
+    throw error;
+  }
 }
 
 async function loadDisputes() {
@@ -230,7 +318,7 @@ $("#refresh-disputes").addEventListener("click", () => loadDisputes().catch((err
 $("#bounty-search").addEventListener("input", (event) => { state.filters.search = event.target.value; renderBountyList(); });
 $("#bounty-status").addEventListener("change", (event) => { state.filters.status = event.target.value; renderBountyList(); });
 $("#create-bounty-form").addEventListener("submit", createBounty);
-$("#release-bounty").addEventListener("click", async () => { try { const result = await api(`/api/bounties/${state.selected.contract_bounty_id}/release`, { method: "POST" }); notice(`Release submitted: ${short(result.transaction_hash, 18)}`); } catch (error) { notice(error.message, true); } });
+$("#release-bounty").addEventListener("click", async () => { try { if (!state.selected) throw new Error("Select a bounty first."); setTransactionState("pending", "Release pending", "Submitting the payout transaction..."); const result = await api(`/api/bounties/${state.selected.contract_bounty_id}/release`, { method: "POST" }); setTransactionState(result.status === "failed" ? "failed" : "confirmed", result.status === "failed" ? "Release failed" : "Release confirmed", result.error || `Payout transaction: ${short(result.transaction_hash, 18)}`); notice(`Release submitted: ${short(result.transaction_hash, 18)}`); await loadBounties(); } catch (error) { setTransactionState("failed", "Release failed", error.message); notice(error.message, true); } });
 $("#cancel-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/cancel/prepare`, null, `/api/bounties/${state.selected.contract_bounty_id}/cancel/confirm`).catch((error) => notice(error.message, true)));
 $("#refund-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/refund/prepare`, null, `/api/bounties/${state.selected.contract_bounty_id}/refund/confirm`).catch((error) => notice(error.message, true)));
 $("#open-dispute-form").addEventListener("submit", async (event) => { event.preventDefault(); const formElement = event.currentTarget; try { const evidence = JSON.parse(new FormData(formElement).get("evidence")); await prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/disputes/prepare`, { evidence }, `/api/bounties/${state.selected.contract_bounty_id}/disputes/confirm`); await loadDisputes(); } catch (error) { notice(error.message, true); } });

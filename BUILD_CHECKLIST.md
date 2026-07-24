@@ -102,10 +102,10 @@ The blockchain implementation in `Blockchain/` is deployed on Polygon Amoy and v
 - [x] Build bounty creation: GitHub Issue URL, reward amount, expiry, recipient policy, ERC-20 approval, and contract transaction status.
 - [x] Build active-bounties list with contract and database lifecycle state.
 - [x] Build verdict detail: score, agent breakdown, findings, CID, evidence-hash verification, and transaction links.
-- [ ] Display challenge countdown and permitted actions.
+- [x] Display challenge countdown and permitted actions.
 - [x] Build dispute form that uploads/pins dispute evidence and calls `openDispute`.
 - [x] Build resolver-only dispute controls for payout/refund.
-- [ ] Show clear pending, confirmed, failed, disputed, and settled states.
+- [x] Show clear pending, confirmed, failed, disputed, and settled states.
 
 ## 8. End-to-end verification and submission
 

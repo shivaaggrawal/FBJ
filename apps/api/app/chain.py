@@ -232,9 +232,16 @@ class Web3ChainClient(ChainClient):
             raise ChainError("Chain RPC, contract addresses, and relayer key must be configured")
         try:
             from web3 import Web3
+            try:
+                from web3.middleware import ExtraDataToPOAMiddleware
+            except ImportError:  # web3.py v6 compatibility
+                from web3.middleware import geth_poa_middleware as ExtraDataToPOAMiddleware
         except ImportError as exc:
             raise ChainError("web3 is required for non-fixture chain access") from exc
         self._web3 = Web3(Web3.HTTPProvider(settings.amoy_rpc_url))
+        # Polygon Amoy uses PoA-compatible block metadata; without this, block
+        # reads can fail when extraData exceeds Ethereum's 32-byte limit.
+        self._web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         if not self._web3.is_connected():
             raise ChainError("Unable to connect to the configured EVM RPC endpoint")
         self._chain_id = settings.chain_id
