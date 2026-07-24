@@ -170,6 +170,11 @@ async function selectBounty(id) {
 
 async function createBounty(event) {
   event.preventDefault();
+<<<<<<< HEAD
+=======
+  // Event.currentTarget is only set while the submit listener is running.
+  // Keep the form before awaiting the wallet connection.
+>>>>>>> 62c2f430da75cfba06366eae731abacee51d4773
   const formElement = event.currentTarget;
   try {
     await connectWallet();
