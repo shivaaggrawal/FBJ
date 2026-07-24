@@ -7,7 +7,6 @@ The API provides a FastAPI health endpoint, signed GitHub webhook ingress, deter
 ```powershell
 # From the repository root. Requires the Windows Python 3.10 launcher.
 .\apps\api\scripts\setup-dev.ps1
-Copy-Item .env.example .env
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --app-dir apps\api
 
 # Run the pinned test environment.
@@ -25,6 +24,21 @@ python scripts/fixture_e2e.py
 ```
 
 The browser dashboard is served by the API at `http://127.0.0.1:8000/app/`. It connects an Amoy wallet, prepares ERC-20 approval and bounty transactions, registers confirmed bounties, displays evidence/review state, and prepares wallet-signed dispute, cancellation, refund, and resolver actions.
+
+## Local sandbox without Amoy POL
+
+Run a full local EVM sandbox when Amoy POL is unavailable:
+
+```powershell
+cd ..\..
+.\scripts\start-local-sandbox.ps1
+```
+
+The script starts a hidden Hardhat RPC at `http://127.0.0.1:8545`, deploys MockUSDC plus the three protocol contracts, updates the repository-root `.env` with the local addresses, and starts the API/dashboard at `http://127.0.0.1:8000/app/`. Configure MetaMask with chain ID `31337` and import the first Hardhat account for wallet transactions. Stop the local services with:
+
+```powershell
+.\scripts\stop-local-sandbox.ps1
+```
 
 ## MongoDB development mode
 
@@ -59,7 +73,7 @@ The attestation endpoint never accepts a payout address from its caller. It uses
 The API deliberately does not hold a maintainer private key. A maintainer wallet must approve the ERC-20 and call `BountyEscrow.createBounty`; the API then verifies the confirmed transaction, the `BountyCreated` event, the escrow fields, and a wallet signature before it saves the GitHub mapping.
 
 1. Set the deployed Amoy addresses and `FIXTURE_MODE=false` in the repository-root `.env`, then start MongoDB and the API.
-2. From `Blockchain/`, set the same escrow address and the maintainer wallet in its local `.env`, then run `npm.cmd run bounty:create -- <escrow> <token-or-zero-address> <bounty-id> <token-smallest-unit-amount> <expiry-unix>`.
+2. From `Blockchain/`, use the same repository-root `.env`, then run `npm.cmd run bounty:create -- <escrow> <token-or-zero-address> <bounty-id> <token-smallest-unit-amount> <expiry-unix>`.
 3. Submit the creation metadata, transaction hash, and maintainer signature to `POST /api/bounties`. Request `POST /api/bounties/registration-message` with the same payload first to obtain the exact message to sign with `personal_sign`.
 
 `expires_at` is the exact Unix timestamp submitted to the contract. `challenge_seconds` is retained as application metadata; the deployed `VerdictRegistry` challenge period controls the actual on-chain release delay.

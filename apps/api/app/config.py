@@ -1,5 +1,7 @@
 from functools import lru_cache
+import os
 from pathlib import Path
+from typing import Any
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,7 +10,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=PROJECT_ROOT / ".env", extra="ignore")
+    # Runtime defaults to the repository .env. Tests and the local sandbox can
+    # select an isolated file with FBJ_ENV_FILE without changing deployment
+    # configuration or relying on process-specific dotenv behavior.
+    model_config = SettingsConfigDict(env_file=None, extra="ignore")
+
+    def __init__(self, **values: Any) -> None:
+        values.setdefault("_env_file", os.getenv("FBJ_ENV_FILE", str(PROJECT_ROOT / ".env")))
+        super().__init__(**values)
 
     app_env: str = "development"
     fixture_mode: bool = True
@@ -65,21 +74,25 @@ class Settings(BaseSettings):
             raise ValueError("PINATA_JWT is required when IPFS_PROVIDER=pinata")
         if self.chain_event_poll_seconds <= 0 or self.chain_event_confirmations < 0:
             raise ValueError("Chain event polling values must be non-negative")
-        if not self.fixture_mode and self.database_mode != "mongodb":
+        is_local_sandbox = not self.fixture_mode and self.app_env == "development" and self.chain_id == 31337
+        if not self.fixture_mode and not is_local_sandbox and self.database_mode != "mongodb":
             raise ValueError("Non-fixture deployments require DATABASE_MODE=mongodb")
         if not self.fixture_mode:
             required = {
-                "GITHUB_WEBHOOK_SECRET": self.github_webhook_secret.get_secret_value() != "replace-me",
-                "GITHUB_ALLOWED_REPOSITORIES": bool(self.github_allowed_repositories),
                 "AMOY_RPC_URL": bool(self.amoy_rpc_url),
                 "BOUNTY_ESCROW_ADDRESS": bool(self.bounty_escrow_address),
                 "VERDICT_REGISTRY_ADDRESS": bool(self.verdict_registry_address),
                 "DISPUTE_MANAGER_ADDRESS": bool(self.dispute_manager_address),
                 "REWARD_TOKEN_ADDRESS": bool(self.reward_token_address),
                 "RELAYER_PRIVATE_KEY": self.relayer_private_key is not None,
-                "IPFS_PROVIDER": self.ipfs_provider == "pinata",
-                "PINATA_JWT": self.pinata_jwt is not None,
             }
+            if not is_local_sandbox:
+                required.update({
+                    "GITHUB_WEBHOOK_SECRET": self.github_webhook_secret.get_secret_value() != "replace-me",
+                    "GITHUB_ALLOWED_REPOSITORIES": bool(self.github_allowed_repositories),
+                    "IPFS_PROVIDER": self.ipfs_provider == "pinata",
+                    "PINATA_JWT": self.pinata_jwt is not None,
+                })
             missing = [key for key, configured in required.items() if not configured]
             if missing:
                 raise ValueError("Missing production configuration: " + ", ".join(missing))

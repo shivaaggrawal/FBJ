@@ -12,6 +12,32 @@ repository = settings.github_allowed_repositories[0] if settings.github_allowed_
 webhook_secret = settings.github_webhook_secret.get_secret_value()
 
 
+class FakeGitHubClient:
+    def __init__(self, settings: Settings, installation_id: str | int | None = None) -> None:
+        self.installation_id = installation_id
+
+    async def create_pending_check(self, repository: str, commit_sha: str) -> int:
+        return 101
+
+    async def fetch_review_input(self, bounty_id: str, repository: str, number: int, criteria: str):
+        from app.schemas import ReviewInput
+
+        return ReviewInput(
+            bounty_id=bounty_id,
+            repository=repository,
+            pull_request_number=number,
+            commit_sha="a" * 40,
+            title="Test",
+            diff="diff --git a/a.py b/a.py",
+            changed_files=[],
+            author="developer",
+            criteria=criteria,
+        )
+
+    async def complete_check(self, repository: str, check_run_id: int, result) -> None:
+        return None
+
+
 def create_bounty():
     return client.post("/api/bounties", json={"contract_bounty_id": "0x" + "ab" * 32, "repository": repository,
         "issue_url": f"https://github.com/{repository}/issues/1", "reward_token": "0x" + "12" * 20,
@@ -30,6 +56,19 @@ def test_health():
         "github_app_enabled": settings.github_app_enabled,
     }
     assert webhook_secret not in response.text
+
+
+def test_client_config_uses_isolated_fixture_settings():
+    response = client.get("/api/client-config")
+    assert response.status_code == 200
+    assert response.json() == {
+        "chain_id": 31337,
+        "chain_hex": "0x7a69",
+        "chain_name": "Hardhat Local",
+        "explorer_base_url": None,
+        "fixture_mode": True,
+        "reward_token_address": None,
+    }
 
 
 def test_dashboard_is_served_by_the_api():
@@ -79,7 +118,9 @@ def test_webhook_without_matching_bounty_is_reported():
     assert response.json()["status"] == "no_matching_bounty"
 
 
-def test_valid_supported_webhook_is_accepted():
+def test_valid_supported_webhook_is_accepted(monkeypatch):
+    monkeypatch.setattr("app.main.GitHubAppClient", FakeGitHubClient)
+    monkeypatch.setattr("app.worker.GitHubAppClient", FakeGitHubClient)
     assert create_bounty().status_code == 201
     payload = (f'{{"action":"opened","number":1,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","user":{{"login":"developer"}}}}}}').encode()
     signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
@@ -88,7 +129,9 @@ def test_valid_supported_webhook_is_accepted():
     assert response.json()["status"] == "accepted"
 
 
-def test_duplicate_delivery_is_idempotent():
+def test_duplicate_delivery_is_idempotent(monkeypatch):
+    monkeypatch.setattr("app.main.GitHubAppClient", FakeGitHubClient)
+    monkeypatch.setattr("app.worker.GitHubAppClient", FakeGitHubClient)
     payload = (f'{{"action":"opened","number":2,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","user":{{"login":"developer"}}}}}}').encode()
     signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
     headers = {"X-Hub-Signature-256": "sha256=" + signature, "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "duplicate-delivery"}

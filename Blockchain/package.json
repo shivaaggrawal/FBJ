@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test:coverage": "hardhat coverage",
     "deploy:mock-usdc": "hardhat run scripts/deployMockUSDC.ts",
+    "deploy:local-sandbox": "hardhat run --no-compile scripts/deployLocalSandbox.ts --network localhost",
     "deploy:mock-usdc:amoy": "hardhat run scripts/deployMockUSDC.ts --network amoy",
     "deploy:amoy": "hardhat run scripts/deploy.ts --network amoy",
     "deploy:resume:amoy": "hardhat run scripts/resumeAmoyDeploy.ts --network amoy",

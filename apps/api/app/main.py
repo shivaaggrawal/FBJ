@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .attestation import AttestationError, attest_review, release_bounty
 from .bounties import BountyRegistrationError, registration_message, verify_on_chain_bounty
-from .chain import ChainClient, build_chain_client
+from .chain import ChainClient, ChainError, build_chain_client
 from .config import Settings, get_settings
 from .disputes import (
     DisputeError,
@@ -91,6 +91,20 @@ def get_chain(request: Request) -> ChainClient:
 async def health(settings: Settings = Depends(get_settings)) -> dict[str, str | bool]:
     return {"status": "ok", "environment": settings.app_env, "fixture_mode": settings.fixture_mode,
             "ai_provider": settings.ai_provider, "github_app_enabled": settings.github_app_enabled}
+
+
+@app.get("/api/client-config")
+async def client_config(settings: Settings = Depends(get_settings)) -> dict[str, int | str | bool | None]:
+    explorer_base_url = "https://amoy.polygonscan.com" if settings.chain_id == 80002 else None
+    chain_name = "Polygon Amoy" if settings.chain_id == 80002 else "Hardhat Local" if settings.chain_id == 31337 else f"Chain {settings.chain_id}"
+    return {
+        "chain_id": settings.chain_id,
+        "chain_hex": hex(settings.chain_id),
+        "chain_name": chain_name,
+        "explorer_base_url": explorer_base_url,
+        "fixture_mode": settings.fixture_mode,
+        "reward_token_address": settings.reward_token_address,
+    }
 
 
 @app.post("/api/reviews/fixture", response_model=ReviewResponse)

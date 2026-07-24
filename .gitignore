@@ -8,6 +8,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.sandbox/
 
 # JavaScript dependencies
 node_modules/
