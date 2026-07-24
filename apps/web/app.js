@@ -66,9 +66,12 @@ async function sendWalletTransaction(transaction) {
   await ensureExpectedChain();
   if (transaction.to === "fixture") throw new Error("Fixture mode cannot send wallet transactions. Deploy the Amoy contracts first.");
   const quotedGasPrice = BigInt(await window.ethereum.request({ method: "eth_gasPrice" }));
+  const minimumAmoyGasPrice = 75_000_000_000n;
   // Use a legacy gas price with headroom. The configured Amoy RPC rejects
   // MetaMask's EIP-1559 priority-fee proposal even when the transaction is valid.
-  const gasPrice = quotedGasPrice * 12n / 10n;
+  const gasPrice = quotedGasPrice * 12n / 10n > minimumAmoyGasPrice
+    ? quotedGasPrice * 12n / 10n
+    : minimumAmoyGasPrice;
   return window.ethereum.request({ method: "eth_sendTransaction", params: [{
     from: state.account,
     to: transaction.to,

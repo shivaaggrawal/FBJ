@@ -3,6 +3,7 @@ import hmac
 import json
 import logging
 import asyncio
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -73,6 +74,21 @@ app = FastAPI(title="Fair Bounty Judge API", version="0.1.0", lifespan=lifespan)
 app.state.store = MemoryStore()  # Supports local tooling that does not trigger ASGI lifespan.
 app.state.ipfs = FixtureIpfsClient()
 app.state.chain = build_chain_client(get_settings())
+
+_CLOSING_ISSUE_PATTERN = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*#(?P<number>\d+)\b",
+    re.IGNORECASE,
+)
+
+
+def linked_issue_url(repository: str, pull_request_body: object) -> str | None:
+    """Return the issue explicitly closed by the PR in this repository."""
+    if not isinstance(pull_request_body, str):
+        return None
+    match = _CLOSING_ISSUE_PATTERN.search(pull_request_body)
+    if match is None:
+        return None
+    return f"https://github.com/{repository}/issues/{match.group('number')}"
 
 
 def get_store(request: Request) -> Store:
@@ -381,10 +397,11 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
     repository = event.get("repository", {}).get("full_name")
     if settings.github_allowed_repositories and repository not in settings.github_allowed_repositories:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Repository is not allowlisted")
-    bounty = await store.find_bounty(repository)
+    pull_request = event.get("pull_request", {})
+    issue_url = linked_issue_url(repository, pull_request.get("body"))
+    bounty = await store.find_bounty(repository, issue_url) if issue_url else None
     if bounty is None:
         return GitHubWebhookResponse(request_id=str(uuid4()), status="no_matching_bounty", delivery_id=delivery_id)
-    pull_request = event.get("pull_request", {})
     installation_id = event.get("installation", {}).get("id")
     commit_sha = pull_request.get("head", {}).get("sha")
     number = event.get("number")

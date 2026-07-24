@@ -31,7 +31,7 @@ class Store:
     async def list_bounties(self) -> list[dict[str, Any]]: ...
     async def get_bounty(self, contract_bounty_id: str) -> dict[str, Any] | None: ...
     async def update_bounty(self, contract_bounty_id: str, values: dict[str, Any]) -> None: ...
-    async def find_bounty(self, repository: str) -> dict[str, Any] | None: ...
+    async def find_bounty(self, repository: str, issue_url: str | None = None) -> dict[str, Any] | None: ...
     async def create_dispute(self, dispute: dict[str, Any]) -> dict[str, Any]: ...
     async def get_dispute(self, bounty_id: str) -> dict[str, Any] | None: ...
     async def list_disputes(self) -> list[dict[str, Any]]: ...
@@ -92,9 +92,13 @@ class MemoryStore(Store):
             raise KeyError(contract_bounty_id)
         bounty.update(values | {"updated_at": utcnow()})
 
-    async def find_bounty(self, repository: str) -> dict[str, Any] | None:
+    async def find_bounty(self, repository: str, issue_url: str | None = None) -> dict[str, Any] | None:
         for bounty in self.bounties.values():
-            if bounty["repository"] == repository and bounty["status"] == "open":
+            if (
+                bounty["repository"] == repository
+                and bounty["status"] == "open"
+                and (issue_url is None or bounty["issue_url"] == issue_url)
+            ):
                 return deepcopy(bounty)
         return None
 
@@ -228,8 +232,11 @@ class MongoStore(Store):
             {"$set": values | {"updated_at": utcnow()}},
         )
 
-    async def find_bounty(self, repository: str) -> dict[str, Any] | None:
-        return await self.db.bounties.find_one({"repository": repository, "status": "open"}, {"_id": 0})
+    async def find_bounty(self, repository: str, issue_url: str | None = None) -> dict[str, Any] | None:
+        query: dict[str, Any] = {"repository": repository, "status": "open"}
+        if issue_url is not None:
+            query["issue_url"] = issue_url
+        return await self.db.bounties.find_one(query, {"_id": 0})
 
     async def create_dispute(self, dispute: dict[str, Any]) -> dict[str, Any]:
         from pymongo.errors import DuplicateKeyError

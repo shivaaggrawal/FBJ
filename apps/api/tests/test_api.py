@@ -140,7 +140,7 @@ def test_closed_webhook_is_ignored():
 
 
 def test_webhook_without_matching_bounty_is_reported():
-    payload = (f'{{"action":"opened","number":1,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","user":{{"login":"developer"}}}}}}').encode()
+    payload = (f'{{"action":"opened","number":1,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","body":"Fixes #404","user":{{"login":"developer"}}}}}}').encode()
     signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
     response = client.post("/webhooks/github", content=payload, headers={
         "X-Hub-Signature-256": "sha256=" + signature,
@@ -155,7 +155,7 @@ def test_valid_supported_webhook_is_accepted(monkeypatch):
     monkeypatch.setattr("app.main.GitHubAppClient", FakeGitHubClient)
     monkeypatch.setattr("app.worker.GitHubAppClient", FakeGitHubClient)
     assert create_bounty().status_code == 201
-    payload = (f'{{"action":"opened","number":1,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","user":{{"login":"developer"}}}}}}').encode()
+    payload = (f'{{"action":"opened","number":1,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","body":"Fixes #1","user":{{"login":"developer"}}}}}}').encode()
     signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
     response = client.post("/webhooks/github", content=payload, headers={"X-Hub-Signature-256": "sha256=" + signature, "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "delivery-1"})
     assert response.status_code == 202
@@ -165,7 +165,7 @@ def test_valid_supported_webhook_is_accepted(monkeypatch):
 def test_duplicate_delivery_is_idempotent(monkeypatch):
     monkeypatch.setattr("app.main.GitHubAppClient", FakeGitHubClient)
     monkeypatch.setattr("app.worker.GitHubAppClient", FakeGitHubClient)
-    payload = (f'{{"action":"opened","number":2,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","user":{{"login":"developer"}}}}}}').encode()
+    payload = (f'{{"action":"opened","number":2,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","body":"Fixes #1","user":{{"login":"developer"}}}}}}').encode()
     signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
     headers = {"X-Hub-Signature-256": "sha256=" + signature, "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "duplicate-delivery"}
     first, second = client.post("/webhooks/github", content=payload, headers=headers), client.post("/webhooks/github", content=payload, headers=headers)
