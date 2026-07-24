@@ -1,4 +1,4 @@
-const state = { account: null, bounties: [], selected: null };
+const state = { account: null, bounties: [], selected: null, config: null, filters: { search: "", status: "all" } };
 const api = (path, options = {}) => fetch(path, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options })
   .then(async (response) => {
     const body = await response.json().catch(() => ({}));
@@ -9,6 +9,8 @@ const api = (path, options = {}) => fetch(path, { headers: { "Content-Type": "ap
 const $ = (selector) => document.querySelector(selector);
 const short = (value, length = 10) => !value ? "-" : value.length > length ? `${value.slice(0, length)}...` : value;
 const asDate = (value) => value ? new Date(Number(value) * 1000).toLocaleString() : "-";
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
+const safeHref = (value) => /^https?:\/\//i.test(String(value || "")) ? escapeHtml(value) : "#";
 
 function notice(message, isError = false) {
   const target = $("#notice");
@@ -24,12 +26,14 @@ function newBountyId() {
 
 async function connectWallet() {
   if (!window.ethereum) throw new Error("No browser wallet found. Install MetaMask or another EIP-1193 wallet.");
+  if (!state.config) await loadClientConfig();
   const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
   const chainId = await window.ethereum.request({ method: "eth_chainId" });
   state.account = accounts[0];
   $("#connect-wallet").textContent = short(state.account, 12);
-  $("#network-status").textContent = chainId === "0x13882" ? "Polygon Amoy" : `Wrong network: ${chainId}`;
-  if (chainId !== "0x13882") notice("Switch the wallet network to Polygon Amoy before sending a transaction.", true);
+  const expectedChain = state.config.chain_hex;
+  $("#network-status").textContent = chainId === expectedChain ? state.config.chain_name : `Wrong network: ${chainId}`;
+  if (chainId !== expectedChain) notice(`Switch the wallet network to ${state.config.chain_name} before sending a transaction.`, true);
 }
 
 async function sendWalletTransaction(transaction) {
@@ -59,23 +63,60 @@ function statusClass(status) {
   return status ? status.replaceAll("_", " ") : "unknown";
 }
 
+function renderMetrics() {
+  const counts = state.bounties.reduce((result, bounty) => {
+    const status = String(bounty.status || "").toLowerCase();
+    result.total += 1;
+    if (["open", "under_review", "analyzing", "challenge_open"].includes(status)) result.active += 1;
+    if (["paid_out", "released", "resolved_release"].includes(status)) result.paid += 1;
+    if (["challenged", "disputed", "flagged_for_review", "flagged"].includes(status)) result.attention += 1;
+    return result;
+  }, { total: 0, active: 0, paid: 0, attention: 0 });
+  $("#metric-total").textContent = counts.total;
+  $("#metric-active").textContent = counts.active;
+  $("#metric-paid").textContent = counts.paid;
+  $("#metric-attention").textContent = counts.attention;
+}
+
+function visibleBounties() {
+  const search = state.filters.search.toLowerCase();
+  return state.bounties.filter((bounty) => {
+    const matchesSearch = !search || `${bounty.repository} ${bounty.contract_bounty_id}`.toLowerCase().includes(search);
+    const matchesStatus = state.filters.status === "all" || bounty.status === state.filters.status;
+    return matchesSearch && matchesStatus;
+  });
+}
+
+function renderBountyList() {
+  const target = $("#bounty-list");
+  const bounties = visibleBounties();
+  if (!bounties.length) { target.innerHTML = '<p class="empty">No bounties match this view.</p>'; return; }
+  target.innerHTML = bounties.map((bounty) => `<button class="bounty-row ${state.selected?.contract_bounty_id === bounty.contract_bounty_id ? "selected" : ""}" data-bounty="${escapeHtml(bounty.contract_bounty_id)}" type="button">
+    <strong>${escapeHtml(bounty.repository)}</strong><span>${escapeHtml(short(bounty.contract_bounty_id, 18))}</span><span class="row-foot"><i>${escapeHtml(statusClass(bounty.status))}</i><i>${escapeHtml(short(bounty.reward_amount))} units</i></span>
+  </button>`).join("");
+  target.querySelectorAll("[data-bounty]").forEach((button) => button.addEventListener("click", () => selectBounty(button.dataset.bounty)));
+}
+
+async function loadClientConfig() {
+  state.config = await api("/api/client-config");
+  $("#network-status").textContent = state.config.fixture_mode ? "Fixture mode" : state.config.chain_name;
+  const rewardInput = $("[name=reward_token]");
+  if (rewardInput && state.config.reward_token_address) rewardInput.value = state.config.reward_token_address;
+}
+
 async function loadBounties() {
   state.bounties = await api("/api/bounties");
   $("#bounty-count").textContent = String(state.bounties.length);
-  const target = $("#bounty-list");
-  if (!state.bounties.length) { target.innerHTML = '<p class="empty">No registered bounties yet.</p>'; return; }
-  target.innerHTML = state.bounties.map((bounty) => `<button class="bounty-row ${state.selected?.contract_bounty_id === bounty.contract_bounty_id ? "selected" : ""}" data-bounty="${bounty.contract_bounty_id}" type="button">
-    <strong>${bounty.repository}</strong><span>${short(bounty.contract_bounty_id, 18)}</span><span class="row-foot"><i>${statusClass(bounty.status)}</i><i>${short(bounty.reward_amount)} units</i></span>
-  </button>`).join("");
-  target.querySelectorAll("[data-bounty]").forEach((button) => button.addEventListener("click", () => selectBounty(button.dataset.bounty)));
+  renderMetrics();
+  renderBountyList();
 }
 
 function renderReview(review) {
   if (!review) return '<p class="empty">No completed review attached to this bounty yet.</p>';
   const agents = (review.agent_results || []).map((agent) => `<div class="agent-row"><span>${agent.agent}</span><span class="bar"><i style="width:${agent.score_bps / 100}%"></i></span><b>${agent.score_bps / 100}%</b></div>`).join("");
   const cid = review.evidence_cid ? `<a href="https://gateway.pinata.cloud/ipfs/${review.evidence_cid}" target="_blank" rel="noreferrer">${short(review.evidence_cid, 22)}</a>` : "-";
-  const tx = review.attestation_tx_hash ? `<a href="https://amoy.polygonscan.com/tx/${review.attestation_tx_hash}" target="_blank" rel="noreferrer">${short(review.attestation_tx_hash, 18)}</a>` : "-";
-  return `<div class="review-score">${review.final_score_bps ? `${review.final_score_bps / 100}%` : "-"}</div>${agents}<div class="facts"><div class="fact"><b>Evidence CID</b>${cid}</div><div class="fact"><b>Evidence hash</b>${short(review.evidence_hash, 22)}</div><div class="fact"><b>Attestation</b>${review.attestation_status || "-"}</div><div class="fact"><b>Transaction</b>${tx}</div></div>`;
+  const tx = review.attestation_tx_hash && state.config?.explorer_base_url ? `<a href="${state.config.explorer_base_url}/tx/${review.attestation_tx_hash}" target="_blank" rel="noreferrer">${short(review.attestation_tx_hash, 18)}</a>` : short(review.attestation_tx_hash, 18);
+  return `<div class="review-score">${review.final_score_bps ? `${review.final_score_bps / 100}%` : "-"}</div>${agents}<div class="facts"><div class="fact"><b>Evidence CID</b>${cid}</div><div class="fact"><b>Evidence hash</b>${escapeHtml(short(review.evidence_hash, 22))}</div><div class="fact"><b>Attestation</b>${escapeHtml(review.attestation_status || "-")}</div><div class="fact"><b>Commit</b>${escapeHtml(short(review.commit_sha, 18))}</div><div class="fact"><b>Transaction</b>${tx}</div></div>`;
 }
 
 async function selectBounty(id) {
@@ -84,8 +125,11 @@ async function selectBounty(id) {
   $("#bounty-detail").classList.remove("hidden");
   $("#detail-title").textContent = short(id, 22);
   $("#detail-repository").textContent = state.selected.repository;
+  const issueLink = $("#detail-issue");
+  issueLink.href = safeHref(state.selected.issue_url);
+  issueLink.classList.toggle("disabled-link", issueLink.href === "#");
   $("#detail-status").textContent = statusClass(state.selected.status);
-  $("#detail-facts").innerHTML = `<div class="fact"><b>Reward</b>${state.selected.reward_amount}</div><div class="fact"><b>Expiry</b>${asDate(state.selected.expires_at)}</div><div class="fact"><b>Maintainer</b>${short(state.selected.maintainer_wallet, 18)}</div><div class="fact"><b>Recipient</b>${short(state.selected.recipient_wallet, 18)}</div>`;
+  $("#detail-facts").innerHTML = `<div class="fact"><b>Reward</b>${escapeHtml(state.selected.reward_amount)}</div><div class="fact"><b>Expiry</b>${escapeHtml(asDate(state.selected.expires_at))}</div><div class="fact"><b>Maintainer</b>${escapeHtml(short(state.selected.maintainer_wallet, 18))}</div><div class="fact"><b>Recipient</b>${escapeHtml(short(state.selected.recipient_wallet, 18))}</div>`;
   $("#review-detail").innerHTML = '<p class="empty">Loading chain state...</p>';
   await loadBounties();
   try {
@@ -155,6 +199,8 @@ function setView(name) {
 $("#connect-wallet").addEventListener("click", () => connectWallet().catch((error) => notice(error.message, true)));
 $("#refresh-bounties").addEventListener("click", () => loadBounties().catch((error) => notice(error.message, true)));
 $("#refresh-disputes").addEventListener("click", () => loadDisputes().catch((error) => notice(error.message, true)));
+$("#bounty-search").addEventListener("input", (event) => { state.filters.search = event.target.value; renderBountyList(); });
+$("#bounty-status").addEventListener("change", (event) => { state.filters.status = event.target.value; renderBountyList(); });
 $("#create-bounty-form").addEventListener("submit", createBounty);
 $("#release-bounty").addEventListener("click", async () => { try { const result = await api(`/api/bounties/${state.selected.contract_bounty_id}/release`, { method: "POST" }); notice(`Release submitted: ${short(result.transaction_hash, 18)}`); } catch (error) { notice(error.message, true); } });
 $("#cancel-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/cancel/prepare`, null, `/api/bounties/${state.selected.contract_bounty_id}/cancel/confirm`).catch((error) => notice(error.message, true)));
@@ -165,4 +211,4 @@ document.querySelectorAll(".nav-link").forEach((link) => link.addEventListener("
 
 const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); expiry.setMinutes(expiry.getMinutes() - expiry.getTimezoneOffset());
 $("[name=expires_at]").value = expiry.toISOString().slice(0, 16);
-loadBounties().catch((error) => notice(error.message, true));
+loadClientConfig().then(loadBounties).catch((error) => notice(error.message, true));

@@ -4,7 +4,40 @@ const DAY = 24 * 60 * 60;
 const EVIDENCE_CID = "QmRhT26bHFNVLzWTVmWNLYt9KdcTHgX31LvrcgHapaxihr";
 const BOUNTY_AMOUNT = 1_000_000n;
 
-async function receiptGas(transactionPromise: Promise<{ wait: () => Promise<{ gasUsed: bigint } | null> }>) {
+type Transaction = { wait: () => Promise<{ gasUsed: bigint } | null> };
+
+type DeployedContract = {
+  getAddress: () => Promise<string>;
+  waitForDeployment: () => Promise<unknown>;
+};
+
+type TokenContract = DeployedContract & {
+  connect: (signer: unknown) => TokenContract;
+  mint: (recipient: string, amount: bigint) => Promise<Transaction>;
+  approve: (spender: string, amount: bigint) => Promise<Transaction>;
+};
+
+type EscrowContract = DeployedContract & {
+  connect: (signer: unknown) => EscrowContract;
+  VERDICT_REGISTRY_ROLE: () => Promise<string>;
+  DISPUTE_MANAGER_ROLE: () => Promise<string>;
+  grantRole: (role: string, account: string) => Promise<Transaction>;
+  createBounty: (bountyId: string, token: string, amount: bigint, expiresAt: bigint) => Promise<Transaction>;
+  releaseBounty: (bountyId: string) => Promise<Transaction>;
+};
+
+type RegistryContract = DeployedContract & {
+  connect: (signer: unknown) => RegistryContract;
+  submitVerdict: (bountyId: string, evidenceHash: string, evidenceCid: string, recipient: string, scoreBps: number) => Promise<Transaction>;
+};
+
+type DisputesContract = DeployedContract & {
+  connect: (signer: unknown) => DisputesContract;
+  openDispute: (bountyId: string, evidenceCid: string) => Promise<Transaction>;
+  resolveDispute: (bountyId: string, resolution: number) => Promise<Transaction>;
+};
+
+async function receiptGas(transactionPromise: Promise<Transaction>) {
   const receipt = await (await transactionPromise).wait();
   if (receipt === null) throw new Error("Transaction was not mined");
   return receipt.gasUsed;
@@ -15,19 +48,19 @@ async function main() {
   const [admin, maintainer, relayer, recipient, resolver] = await ethers.getSigners();
 
   const Token = await ethers.getContractFactory("MockUSDC");
-  const token = await Token.deploy();
+  const token = (await Token.deploy()) as unknown as TokenContract;
   await token.waitForDeployment();
 
   const Escrow = await ethers.getContractFactory("BountyEscrow");
-  const escrow = await Escrow.deploy(admin.address, await token.getAddress());
+  const escrow = (await Escrow.deploy(admin.address, await token.getAddress())) as unknown as EscrowContract;
   await escrow.waitForDeployment();
 
   const Registry = await ethers.getContractFactory("VerdictRegistry");
-  const registry = await Registry.deploy(admin.address, await escrow.getAddress(), relayer.address, 7_000, DAY);
+  const registry = (await Registry.deploy(admin.address, await escrow.getAddress(), relayer.address, 7_000, DAY)) as unknown as RegistryContract;
   await registry.waitForDeployment();
 
   const Disputes = await ethers.getContractFactory("DisputeManager");
-  const disputes = await Disputes.deploy(admin.address, await escrow.getAddress(), await registry.getAddress(), resolver.address);
+  const disputes = (await Disputes.deploy(admin.address, await escrow.getAddress(), await registry.getAddress(), resolver.address)) as unknown as DisputesContract;
   await disputes.waitForDeployment();
 
   await (await escrow.grantRole(await escrow.VERDICT_REGISTRY_ROLE(), await registry.getAddress())).wait();
