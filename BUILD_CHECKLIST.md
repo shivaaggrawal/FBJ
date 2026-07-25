@@ -4,6 +4,8 @@
 
 The blockchain implementation in `Blockchain/` is deployed on Polygon Amoy and verified locally: `npm.cmd test` passes **10/10 tests**. It uses ERC-20 rewards on Polygon Amoy, not native-token deposits. The API, dashboard, GitHub App, MongoDB, Pinata, and Groq configuration are integrated. The remaining work is primarily real external end-to-end proof and submission material.
 
+**Progress audit (2026-07-25): 75 / 88 checklist items complete; 13 remain.** The latest registered Amoy bounty is open for `shivaaggrawal/Image-Editor` Issue #6. Webhook matching now requires the PR body to explicitly link the issue (for example, `Fixes #6`), preventing a PR from being reviewed against a different open bounty in the same repository. API regression tests pass **16/16**.
+
 ## 0. Decisions to lock before wiring components
 
 - [x] Select the AI model/provider and record model names and prompt version. Runtime is configured for Groq (`llama-3.3-70b-versatile`).
@@ -44,7 +46,7 @@ The blockchain implementation in `Blockchain/` is deployed on Polygon Amoy and v
   - [x] Prepare `openDispute(bytes32,string)` from the connected maintainer/recipient wallet with pinned, hash-verified evidence.
   - [x] Prepare `resolveDispute(bytes32,Resolution)` from the designated resolver wallet.
 - [x] Poll and persist `BountyCreated`, `VerdictSubmitted`, `DisputeOpened`, `BountyPaid`, `BountyRefunded`, and resolution events with replay-safe cursors.
-- [ ] Set `CHAIN_EVENT_START_BLOCK` to the Amoy deployment block before the first real demo, so historical events can be replayed after restarts.
+- [x] Set `CHAIN_EVENT_START_BLOCK` to the Amoy deployment block (`42917521`), so historical events can be replayed after restarts.
 - [ ] Add one Amoy end-to-end smoke test using a small test-token bounty.
 - [x] Align `SPEC.md` terminology and contract signatures with this ERC-20 implementation.
 
@@ -64,7 +66,7 @@ The blockchain implementation in `Blockchain/` is deployed on Polygon Amoy and v
 - [x] Install the GitHub App on the demo repository.
 - [x] Implement `POST /webhooks/github` and validate `X-Hub-Signature-256`.
 - [x] Handle `pull_request` opened, synchronize, and reopened events.
-- [x] Find the matching bounty by repository and issue/PR criteria.
+- [x] Find the matching bounty by repository and explicit PR issue link (`Fixes #<issue-number>`), preventing same-repository bounty mix-ups.
 - [x] Fetch the PR metadata, changed files, diff, and head commit SHA.
 - [x] Create/update a pending GitHub Check immediately.
 - [x] Post a completed check and PR summary after review.
