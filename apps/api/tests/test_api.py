@@ -1,6 +1,8 @@
 import hashlib
 import hmac
 
+from eth_account import Account
+from eth_account.messages import encode_defunct
 from app.schemas import BountyResponse
 from fastapi.testclient import TestClient
 
@@ -39,10 +41,24 @@ class FakeGitHubClient:
         return None
 
 
-def create_bounty():
-    return client.post("/api/bounties", json={"contract_bounty_id": "0x" + "ab" * 32, "repository": repository,
-        "issue_url": f"https://github.com/{repository}/issues/1", "reward_token": "0x" + "12" * 20,
-        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "recipient_wallet": "0x" + "56" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600})
+def create_bounty(issue_number: int, marker: str):
+    return client.post("/api/bounties", json={"contract_bounty_id": "0x" + marker * 32, "repository": repository,
+        "issue_url": f"https://github.com/{repository}/issues/{issue_number}", "reward_token": "0x" + "12" * 20,
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "expires_at": 1_900_000_000, "challenge_seconds": 3600})
+
+
+CLAIM_CODE = "a1" * 16
+
+
+def claim_bounty(contract_bounty_id: str, github_login: str = "developer"):
+    contributor = Account.create()
+    claim = {"contributor_wallet": contributor.address, "contributor_github_login": github_login, "claim_code": CLAIM_CODE}
+    message = client.post(f"/api/bounties/{contract_bounty_id}/claim-message", json=claim)
+    assert message.status_code == 200
+    claim["claim_signature"] = contributor.sign_message(encode_defunct(text=message.json()["message"])).signature.hex()
+    response = client.post(f"/api/bounties/{contract_bounty_id}/claim", json=claim)
+    assert response.status_code == 200
+    return response
 
 
 def test_health():
@@ -69,6 +85,12 @@ def test_client_config_uses_isolated_fixture_settings():
         "explorer_base_url": None,
         "fixture_mode": True,
         "reward_token_address": None,
+        "wallet_network": {
+            "chainId": "0x7a69",
+            "chainName": "Hardhat Local",
+            "rpcUrls": ["http://127.0.0.1:8545"],
+            "nativeCurrency": {"name": "Hardhat ETH", "symbol": "ETH", "decimals": 18},
+        },
     }
 
 
@@ -78,7 +100,7 @@ def test_dashboard_is_served_by_the_api():
     assert "Fair Bounty Judge" in response.text
 
 
-def test_bounty_recipient_is_required_for_a_payable_bounty():
+def test_bounty_can_be_created_without_a_recipient_before_a_contributor_claims_it():
     response = client.post("/api/bounties/prepare", json={
         "contract_bounty_id": "0x" + "ef" * 32,
         "repository": repository,
@@ -89,8 +111,24 @@ def test_bounty_recipient_is_required_for_a_payable_bounty():
         "expires_at": 1_900_000_000,
         "challenge_seconds": 3600,
     })
-    assert response.status_code == 422
-    assert response.json()["detail"][0]["loc"] == ["body", "recipient_wallet"]
+    assert response.status_code == 200
+
+
+def test_signed_claim_locks_the_contributor_wallet_and_prevents_a_second_active_claim():
+    bounty_id = "0x" + "d4" * 32
+    assert create_bounty(4, "d4").status_code == 201
+    claimed = claim_bounty(bounty_id).json()
+    assert claimed["status"] == "claimed"
+    assert claimed["recipient_wallet"] == claimed["contributor_wallet"]
+    assert claimed["contributor_github_login"] == "developer"
+    assert claimed["claim_expires_at"] > 0
+
+    attacker = Account.create()
+    payload = {"contributor_wallet": attacker.address, "contributor_github_login": "attacker", "claim_code": "b2" * 16}
+    message = client.post(f"/api/bounties/{bounty_id}/claim-message", json=payload).json()["message"]
+    payload["claim_signature"] = attacker.sign_message(encode_defunct(text=message)).signature.hex()
+    response = client.post(f"/api/bounties/{bounty_id}/claim", json=payload)
+    assert response.status_code == 409
 
 
 def test_legacy_bounty_response_without_recipient_is_displayable():
@@ -148,16 +186,42 @@ def test_webhook_without_matching_bounty_is_reported():
         "X-GitHub-Delivery": "no-bounty-delivery",
     })
     assert response.status_code == 202
-    assert response.json()["status"] == "no_matching_bounty"
+    assert response.json()["status"] == "no_matching_claimed_bounty"
 
 
 def test_valid_supported_webhook_is_accepted(monkeypatch):
     monkeypatch.setattr("app.main.GitHubAppClient", FakeGitHubClient)
     monkeypatch.setattr("app.worker.GitHubAppClient", FakeGitHubClient)
-    assert create_bounty().status_code == 201
-    payload = (f'{{"action":"opened","number":1,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","body":"Fixes #1","user":{{"login":"developer"}}}}}}').encode()
+    bounty_id = "0x" + "ab" * 32
+    assert create_bounty(1, "ab").status_code == 201
+    claim_bounty(bounty_id)
+    payload = (f'{{"action":"opened","number":1,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","body":"Fixes #1\\nFBJ-CLAIM:{CLAIM_CODE}","user":{{"login":"developer"}}}}}}').encode()
     signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
     response = client.post("/webhooks/github", content=payload, headers={"X-Hub-Signature-256": "sha256=" + signature, "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "delivery-1"})
+    assert response.status_code == 202
+    assert response.json()["status"] == "accepted"
+
+
+def test_webhook_rejects_a_pull_request_from_an_unclaimed_github_account():
+    bounty_id = "0x" + "e5" * 32
+    assert create_bounty(5, "e5").status_code == 201
+    claim_bounty(bounty_id, github_login="developer")
+    payload = (f'{{"action":"opened","number":5,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","body":"Fixes #5\\nFBJ-CLAIM:{CLAIM_CODE}","user":{{"login":"someone-else"}}}}}}').encode()
+    signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
+    response = client.post("/webhooks/github", content=payload, headers={"X-Hub-Signature-256": "sha256=" + signature, "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "claimant-mismatch-delivery"})
+    assert response.status_code == 202
+    assert response.json()["status"] == "claimant_mismatch"
+
+
+def test_edited_pull_request_with_a_bounty_reference_is_accepted(monkeypatch):
+    monkeypatch.setattr("app.main.GitHubAppClient", FakeGitHubClient)
+    monkeypatch.setattr("app.worker.GitHubAppClient", FakeGitHubClient)
+    bounty_id = "0x" + "bc" * 32
+    assert create_bounty(3, "bc").status_code == 201
+    claim_bounty(bounty_id)
+    payload = (f'{{"action":"edited","number":3,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},"title":"Test","body":"Fixes #3\\nFBJ-CLAIM:{CLAIM_CODE}","user":{{"login":"developer"}}}}}}').encode()
+    signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
+    response = client.post("/webhooks/github", content=payload, headers={"X-Hub-Signature-256": "sha256=" + signature, "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "edited-delivery"})
     assert response.status_code == 202
     assert response.json()["status"] == "accepted"
 
@@ -165,7 +229,10 @@ def test_valid_supported_webhook_is_accepted(monkeypatch):
 def test_duplicate_delivery_is_idempotent(monkeypatch):
     monkeypatch.setattr("app.main.GitHubAppClient", FakeGitHubClient)
     monkeypatch.setattr("app.worker.GitHubAppClient", FakeGitHubClient)
-    payload = (f'{{"action":"opened","number":2,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","body":"Fixes #1","user":{{"login":"developer"}}}}}}').encode()
+    bounty_id = "0x" + "ce" * 32
+    assert create_bounty(2, "ce").status_code == 201
+    claim_bounty(bounty_id)
+    payload = (f'{{"action":"opened","number":2,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"title":"Test","body":"Fixes #2\\nFBJ-CLAIM:{CLAIM_CODE}","user":{{"login":"developer"}}}}}}').encode()
     signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
     headers = {"X-Hub-Signature-256": "sha256=" + signature, "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "duplicate-delivery"}
     first, second = client.post("/webhooks/github", content=payload, headers=headers), client.post("/webhooks/github", content=payload, headers=headers)
@@ -204,7 +271,7 @@ def test_fixture_review_persists_evidence_and_supports_attestation():
 
 
 def test_duplicate_bounty_registration_is_rejected():
-    assert create_bounty().status_code == 409
+    assert create_bounty(1, "ab").status_code == 409
 
 
 def test_wallet_preparation_endpoints_return_unsigned_actions():

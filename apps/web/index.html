@@ -24,7 +24,7 @@
         <div id="notice" class="notice" aria-live="polite"></div>
         <section id="bounties-view" class="view active">
           <div class="page-heading">
-            <div><p class="eyebrow">THE VERIFIABLE WORK MARKETPLACE</p><h1>Fund work.<br><em>Prove the review.</em></h1><p>GitHub-native bounties with transparent AI review, challenge windows, and on-chain payout protection.</p></div>
+            <div><p class="eyebrow">THE VERIFIABLE WORK MARKETPLACE</p><h1>Claim work.<br><em>Earn with proof.</em></h1><p>Funded GitHub work with a signed contributor claim, transparent AI review, and protected on-chain payout.</p></div>
             <button id="refresh-bounties" class="icon-button" type="button" title="Refresh bounties">Refresh</button>
           </div>
           <section class="trust-strip" aria-label="Product value proposition">
@@ -51,14 +51,12 @@
                 <label>Token<input name="reward_token" required value="0x0000000000000000000000000000000000000000"></label>
                 <label>Amount<input name="reward_amount" required inputmode="numeric" value="1000000"></label>
               </div>
-              <p class="section-kicker form-section-kicker">03 / PROTECT THE PAYOUT</p><div class="field-row">
-                <label>Expiry<input name="expires_at" required type="datetime-local"></label>
-                <label>Recipient wallet<input name="recipient_wallet" required placeholder="Contributor wallet"></label>
-              </div>
+              <p class="section-kicker form-section-kicker">03 / SET A DEADLINE</p>
+              <label>Expiry<input name="expires_at" required type="datetime-local"><small class="field-hint">The contributor locks their payout wallet when they claim this bounty.</small></label>
               <button class="primary full" type="submit"><span>Approve and create</span><b>&rarr;</b></button>
             </form>
             <section class="list-panel">
-              <div class="panel-heading"><div><p class="section-kicker">YOUR WORK QUEUE</p><h2>Active bounties</h2></div><span id="bounty-count" class="count-badge">0</span></div>
+              <div class="panel-heading"><div><p class="section-kicker">FIND YOUR NEXT TASK</p><h2>Funded bounties</h2></div><span id="bounty-count" class="count-badge">0</span></div>
               <div class="list-controls"><label class="sr-only" for="bounty-search">Search bounties</label><input id="bounty-search" type="search" placeholder="Search repository or bounty ID"><label class="sr-only" for="bounty-status">Filter by status</label><select id="bounty-status"><option value="all">All statuses</option><option value="open">Open</option><option value="under_review">Under review</option><option value="challenged">Challenged</option><option value="paid_out">Paid out</option><option value="disputed">Disputed</option></select></div>
               <div id="bounty-list" class="bounty-list"><p class="empty">Loading bounties...</p></div>
             </section>
@@ -68,6 +66,12 @@
             <div id="detail-state" class="state-banner" aria-live="polite"><span class="state-dot"></span><div><strong id="state-title">Select a bounty</strong><p id="state-message">Transaction and review status will appear here.</p></div></div>
             <div id="challenge-panel" class="challenge-panel"><div><p class="section-kicker">CHALLENGE WINDOW</p><strong id="challenge-title">Review deadline</strong><p id="challenge-message" class="muted">Loading challenge deadline...</p></div><div id="challenge-countdown" class="countdown">--:--:--</div></div>
             <div id="detail-facts" class="facts"></div>
+            <form id="claim-bounty-form" class="claim-panel">
+              <div><p class="section-kicker">CLAIM THIS BOUNTY</p><strong>Lock your payout wallet</strong><p class="muted">Sign once with MetaMask. Only a PR from this GitHub account with your private claim code will be reviewed.</p></div>
+              <label>GitHub username<input name="contributor_github_login" required autocomplete="username" placeholder="your-github-handle"></label>
+              <button id="claim-bounty" class="primary" type="submit">Claim bounty <b>&rarr;</b></button>
+            </form>
+            <aside id="claim-instructions" class="claim-instructions hidden"><p class="section-kicker">YOUR NEXT STEP</p><strong>Add this exact line to the PR description before submitting:</strong><code id="claim-marker"></code><p class="muted">This proves the PR belongs to your wallet claim and protects your payout.</p></aside>
             <div id="review-detail" class="review-detail"><p class="empty">Select a bounty to inspect its chain state and review.</p></div>
             <div class="action-grid">
               <button id="release-bounty" type="button">Release payout</button>
@@ -91,6 +95,6 @@
         </section>
       </section>
     </main>
-    <script src="/app/app.js?v=20260725-gasfix2"></script>
+    <script src="/app/app.js?v=20260725-wallet-network"></script>
   </body>
 </html>

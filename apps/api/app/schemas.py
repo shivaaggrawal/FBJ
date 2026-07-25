@@ -139,7 +139,6 @@ class BountyCreateRequest(BaseModel):
             "reward_token": "0x0000000000000000000000000000000000000000",
             "reward_amount": "1000000",
             "maintainer_wallet": "0x1111111111111111111111111111111111111111",
-            "recipient_wallet": "0x2222222222222222222222222222222222222222",
             "expires_at": 1_800_000_000,
             "challenge_seconds": 86400,
         }],
@@ -152,7 +151,8 @@ class BountyCreateRequest(BaseModel):
     reward_token: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
     reward_amount: str = Field(pattern=r"^[1-9][0-9]*$")
     maintainer_wallet: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
-    recipient_wallet: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
+    # A contributor binds this address only after claiming an open bounty.
+    recipient_wallet: str | None = Field(default=None, pattern=r"^0x[0-9a-fA-F]{40}$")
     expires_at: int = Field(gt=0, description="Unix timestamp passed to BountyEscrow.createBounty.")
     challenge_seconds: int = Field(gt=0)
 
@@ -163,13 +163,26 @@ class BountyRegistrationRequest(BountyCreateRequest):
 
 
 class BountyResponse(BountyCreateRequest):
-    # Records created before recipient binding was introduced can still be
+    # Records created before contributor claims were introduced can still be
     # displayed, but cannot be used for a new payable review flow.
-    recipient_wallet: str | None = Field(default=None, pattern=r"^0x[0-9a-fA-F]{40}$")
     id: str
     status: str
     chain_id: int | None = None
     creation_tx_hash: str | None = None
+    contributor_wallet: str | None = Field(default=None, pattern=r"^0x[0-9a-fA-F]{40}$")
+    contributor_github_login: str | None = None
+    claimed_at: datetime | None = None
+    claim_expires_at: int | None = None
+
+
+class ClaimBountyMessageRequest(BaseModel):
+    contributor_wallet: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
+    contributor_github_login: str = Field(pattern=r"^[A-Za-z0-9-]{1,39}$")
+    claim_code: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+class ClaimBountyRequest(ClaimBountyMessageRequest):
+    claim_signature: str = Field(min_length=1)
 
 
 class BountyRegistrationMessageResponse(BaseModel):

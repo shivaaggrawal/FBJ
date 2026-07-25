@@ -242,8 +242,10 @@ class Web3ChainClient(ChainClient):
         # Polygon Amoy uses PoA-compatible block metadata; without this, block
         # reads can fail when extraData exceeds Ethereum's 32-byte limit.
         self._web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-        if not self._web3.is_connected():
-            raise ChainError("Unable to connect to the configured EVM RPC endpoint")
+        # Do not prevent the web app from starting just because an RPC is
+        # temporarily unavailable. Each chain operation still surfaces a
+        # precise ChainError, and the operator can restore the endpoint
+        # without taking the dashboard offline.
         self._chain_id = settings.chain_id
         self._account = self._web3.eth.account.from_key(settings.relayer_private_key.get_secret_value())
         self._resolver_account = self._web3.eth.account.from_key(settings.dispute_resolver_private_key.get_secret_value()) if settings.dispute_resolver_private_key else None

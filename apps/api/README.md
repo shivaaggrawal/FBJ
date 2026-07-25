@@ -52,6 +52,7 @@ Core endpoints:
 
 - `POST /api/bounties` registers a bounty only after fixture creation or verified on-chain creation.
 - `GET /api/bounties` and `GET /api/bounties/{contract_bounty_id}` return local lifecycle state.
+- `POST /api/bounties/{contract_bounty_id}/claim-message` and `/claim` bind one contributor's signed wallet and GitHub handle to an open bounty. The contributor adds their unique `FBJ-CLAIM:<code>` marker to the PR description; only that matching PR is reviewed for payout.
 - `POST /api/reviews/fixture` runs the deterministic local review and persists its exact evidence bytes.
 - `GET /api/reviews/{review_id}` and `GET /api/reviews/{review_id}/evidence` expose review state and the canonical JSON that was hashed.
 - `POST /api/reviews/{review_id}/attest` submits an eligible verdict through the configured relayer.
@@ -66,7 +67,7 @@ Maintainer/recipient actions (`openDispute` and `cancelOpenBounty`) remain walle
 
 Set `FIXTURE_MODE=false`, `DATABASE_MODE=mongodb`, `IPFS_PROVIDER=pinata`, and the deployment values in `.env` to enable the real Amoy + Pinata flow. The relayer private key must only hold `RELAYER_ROLE`; review code must never receive it.
 
-The attestation endpoint never accepts a payout address from its caller. It uses only the `recipient_wallet` saved with the verified bounty registration, re-fetches the evidence CID from IPFS, and verifies its Keccak hash before submitting the relayer transaction.
+The attestation endpoint never accepts a payout address from its caller. It uses only the contributor wallet locked by a signed bounty claim, re-fetches the evidence CID from IPFS, and verifies its Keccak hash before submitting the relayer transaction.
 
 ## Creating A Real Bounty
 
@@ -74,7 +75,7 @@ The API deliberately does not hold a maintainer private key. A maintainer wallet
 
 1. Set the deployed Amoy addresses and `FIXTURE_MODE=false` in the repository-root `.env`, then start MongoDB and the API.
 2. From `Blockchain/`, use the same repository-root `.env`, then run `npm.cmd run bounty:create -- <escrow> <token-or-zero-address> <bounty-id> <token-smallest-unit-amount> <expiry-unix>`.
-3. Submit the creation metadata, transaction hash, and maintainer signature to `POST /api/bounties`. Request `POST /api/bounties/registration-message` with the same payload first to obtain the exact message to sign with `personal_sign`.
+3. Submit the creation metadata, transaction hash, and maintainer signature to `POST /api/bounties`. Request `POST /api/bounties/registration-message` with the same payload first to obtain the exact message to sign with `personal_sign`. Do not supply a recipient: a contributor provides their own signed wallet when they claim the published bounty.
 
 `expires_at` is the exact Unix timestamp submitted to the contract. `challenge_seconds` is retained as application metadata; the deployed `VerdictRegistry` challenge period controls the actual on-chain release delay.
 

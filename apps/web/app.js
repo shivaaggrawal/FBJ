@@ -35,6 +35,15 @@ function newBountyId() {
   return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
+function newClaimCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function savedClaimCode(bountyId) {
+  return window.localStorage.getItem(`fbj-claim:${bountyId}`);
+}
+
 async function connectWallet() {
   if (!window.ethereum) throw new Error("No browser wallet found. Install MetaMask or another EIP-1193 wallet.");
   if (!state.config) await loadClientConfig();
@@ -54,7 +63,12 @@ async function ensureExpectedChain() {
   try {
     await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: expectedChain }] });
   } catch (error) {
-    throw new Error(`Switch the wallet network to ${state.config.chain_name} before sending a transaction.`);
+    if (Number(error?.code) === 4902 && state.config.wallet_network) {
+      await window.ethereum.request({ method: "wallet_addEthereumChain", params: [state.config.wallet_network] });
+      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: expectedChain }] });
+    } else {
+      throw new Error(`Switch the wallet network to ${state.config.chain_name} before sending a transaction.`);
+    }
   }
   const switchedChain = await window.ethereum.request({ method: "eth_chainId" });
   $("#network-status").textContent = switchedChain === expectedChain ? state.config.chain_name : `Wrong network: ${switchedChain}`;
@@ -105,7 +119,6 @@ function validateBountyPayload(payload) {
   if (!/^https?:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+/i.test(payload.issue_url || "")) throw new Error("Issue URL must be a valid GitHub issue URL.");
   if (!address.test(payload.reward_token || "")) throw new Error("Token address must be a valid 42-character wallet address.");
   if (!address.test(payload.maintainer_wallet || "")) throw new Error("Connected maintainer wallet is invalid. Reconnect your wallet.");
-  if (!address.test(payload.recipient_wallet || "")) throw new Error("Recipient wallet must be a valid 42-character wallet address.");
   if (!/^[1-9][0-9]*$/.test(payload.reward_amount || "")) throw new Error("Reward amount must be a positive whole number without commas.");
   if (!Number.isInteger(Number(payload.expires_at)) || Number(payload.expires_at) <= Math.floor(Date.now() / 1000)) throw new Error("Expiry must be a future date and time.");
 }
@@ -129,6 +142,15 @@ function setActionAvailability() {
   const challengeEnds = Number(chain.verdict?.challenge_ends_at || chain.bounty?.release_at || 0);
   const challengeOver = challengeEnds > 0 && Date.now() / 1000 >= challengeEnds;
   const isParticipant = state.account && [state.selected.maintainer_wallet, state.selected.recipient_wallet].some((wallet) => normalizedStatus(wallet) === normalizedStatus(state.account));
+  const claimForm = $("#claim-bounty-form");
+  const claimIsAvailable = status === "open" && Number(state.selected.expires_at) > Date.now() / 1000;
+  claimForm.classList.toggle("hidden", !claimIsAvailable);
+  $("#claim-bounty").disabled = !claimIsAvailable;
+  const claimInstructions = $("#claim-instructions");
+  const claimCode = savedClaimCode(state.selected.contract_bounty_id);
+  const isClaimant = state.account && normalizedStatus(state.selected.contributor_wallet) === normalizedStatus(state.account);
+  claimInstructions.classList.toggle("hidden", !isClaimant || !claimCode);
+  if (isClaimant && claimCode) $("#claim-marker").textContent = `FBJ-CLAIM:${claimCode}`;
   $("#release-bounty").disabled = settled || disputeOpen || !challengeOver;
   $("#cancel-bounty").disabled = settled || disputeOpen || !["open"].includes(status);
   $("#refund-bounty").disabled = settled || disputeOpen || !["open", "expired"].includes(status) || (state.selected.expires_at && Date.now() / 1000 < Number(state.selected.expires_at));
@@ -160,7 +182,7 @@ function renderMetrics() {
   const counts = state.bounties.reduce((result, bounty) => {
     const status = String(bounty.status || "").toLowerCase();
     result.total += 1;
-    if (["open", "under_review", "analyzing", "challenge_open"].includes(status)) result.active += 1;
+    if (["open", "claimed", "under_review", "analyzing", "challenge_open"].includes(status)) result.active += 1;
     if (["paid_out", "released", "resolved_release"].includes(status)) result.paid += 1;
     if (["challenged", "disputed", "flagged_for_review", "flagged"].includes(status)) result.attention += 1;
     return result;
@@ -198,7 +220,9 @@ async function loadClientConfig() {
 }
 
 async function loadBounties() {
+  const selectedId = state.selected?.contract_bounty_id;
   state.bounties = await api("/api/bounties");
+  if (selectedId) state.selected = state.bounties.find((bounty) => bounty.contract_bounty_id === selectedId) || state.selected;
   $("#bounty-count").textContent = String(state.bounties.length);
   renderMetrics();
   renderBountyList();
@@ -224,8 +248,9 @@ async function selectBounty(id) {
   issueLink.classList.toggle("disabled-link", issueLink.href === "#");
   $("#detail-status").textContent = statusClass(state.selected.status);
   const initialStatus = normalizedStatus(state.selected.status);
-  setTransactionState(["challenged", "disputed"].includes(initialStatus) ? "disputed" : ["paid_out", "released", "resolved_release", "refunded", "cancelled"].includes(initialStatus) ? "settled" : "confirmed", initialStatus === "open" ? "Awaiting contribution" : statusClass(state.selected.status), initialStatus === "open" ? "Bounty is funded and ready for work." : "Loading the latest chain and review state...");
-  $("#detail-facts").innerHTML = `<div class="fact"><b>Reward</b>${escapeHtml(state.selected.reward_amount)}</div><div class="fact"><b>Expiry</b>${escapeHtml(asDate(state.selected.expires_at))}</div><div class="fact"><b>Maintainer</b>${escapeHtml(short(state.selected.maintainer_wallet, 18))}</div><div class="fact"><b>Recipient</b>${escapeHtml(short(state.selected.recipient_wallet, 18))}</div>`;
+  const claimMessage = initialStatus === "open" ? "Claim this funded bounty to lock your payout wallet." : initialStatus === "claimed" ? "This bounty is reserved for its contributor." : "Loading the latest chain and review state...";
+  setTransactionState(["challenged", "disputed"].includes(initialStatus) ? "disputed" : ["paid_out", "released", "resolved_release", "refunded", "cancelled"].includes(initialStatus) ? "settled" : "confirmed", initialStatus === "open" ? "Ready to claim" : statusClass(state.selected.status), claimMessage);
+  $("#detail-facts").innerHTML = `<div class="fact"><b>Reward</b>${escapeHtml(state.selected.reward_amount)}</div><div class="fact"><b>Expiry</b>${escapeHtml(asDate(state.selected.expires_at))}</div><div class="fact"><b>Maintainer</b>${escapeHtml(short(state.selected.maintainer_wallet, 18))}</div><div class="fact"><b>Contributor</b>${escapeHtml(state.selected.contributor_github_login || "Unclaimed")}</div><div class="fact"><b>Payout wallet</b>${escapeHtml(short(state.selected.recipient_wallet, 18))}</div>${state.selected.claim_expires_at ? `<div class="fact"><b>Claim holds until</b>${escapeHtml(asDate(state.selected.claim_expires_at))}</div>` : ""}`;
   setActionAvailability();
   $("#review-detail").innerHTML = '<p class="empty">Loading chain state...</p>';
   await loadBounties();
@@ -278,6 +303,28 @@ async function createBounty(event) {
   } catch (error) { notice(error.message, true); }
 }
 
+async function claimBounty(event) {
+  event.preventDefault();
+  if (!state.selected) return;
+  const formElement = event.currentTarget;
+  try {
+    await connectWallet();
+    const contributor_github_login = String(new FormData(formElement).get("contributor_github_login") || "").trim();
+    if (!/^[A-Za-z0-9-]{1,39}$/.test(contributor_github_login)) throw new Error("Enter a valid GitHub username.");
+    const claim = { contributor_wallet: state.account, contributor_github_login, claim_code: newClaimCode() };
+    const message = await api(`/api/bounties/${state.selected.contract_bounty_id}/claim-message`, { method: "POST", body: JSON.stringify(claim) });
+    notice("Sign the claim in your wallet. This locks your payout address.");
+    claim.claim_signature = await window.ethereum.request({ method: "personal_sign", params: [message.message, state.account] });
+    const bounty = await api(`/api/bounties/${state.selected.contract_bounty_id}/claim`, { method: "POST", body: JSON.stringify(claim) });
+    window.localStorage.setItem(`fbj-claim:${bounty.contract_bounty_id}`, claim.claim_code);
+    state.selected = bounty;
+    formElement.reset();
+    await loadBounties();
+    await selectBounty(bounty.contract_bounty_id);
+    notice("Bounty claimed. Add your unique claim code to the linked GitHub PR description before submitting it.");
+  } catch (error) { notice(error.message, true); }
+}
+
 async function prepareAndSend(path, body, confirmationPath = null, confirmationBody = {}) {
   if (!state.selected) throw new Error("Select a bounty first.");
   setTransactionState("pending", "Preparing transaction", "Waiting for the wallet to prepare this action...");
@@ -321,6 +368,7 @@ $("#refresh-disputes").addEventListener("click", () => loadDisputes().catch((err
 $("#bounty-search").addEventListener("input", (event) => { state.filters.search = event.target.value; renderBountyList(); });
 $("#bounty-status").addEventListener("change", (event) => { state.filters.status = event.target.value; renderBountyList(); });
 $("#create-bounty-form").addEventListener("submit", createBounty);
+$("#claim-bounty-form").addEventListener("submit", claimBounty);
 $("#release-bounty").addEventListener("click", async () => { try { if (!state.selected) throw new Error("Select a bounty first."); setTransactionState("pending", "Release pending", "Submitting the payout transaction..."); const result = await api(`/api/bounties/${state.selected.contract_bounty_id}/release`, { method: "POST" }); setTransactionState(result.status === "failed" ? "failed" : "confirmed", result.status === "failed" ? "Release failed" : "Release confirmed", result.error || `Payout transaction: ${short(result.transaction_hash, 18)}`); notice(`Release submitted: ${short(result.transaction_hash, 18)}`); await loadBounties(); } catch (error) { setTransactionState("failed", "Release failed", error.message); notice(error.message, true); } });
 $("#cancel-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/cancel/prepare`, null, `/api/bounties/${state.selected.contract_bounty_id}/cancel/confirm`).catch((error) => notice(error.message, true)));
 $("#refund-bounty").addEventListener("click", () => prepareAndSend(`/api/bounties/${state.selected.contract_bounty_id}/refund/prepare`, null, `/api/bounties/${state.selected.contract_bounty_id}/refund/confirm`).catch((error) => notice(error.message, true)));

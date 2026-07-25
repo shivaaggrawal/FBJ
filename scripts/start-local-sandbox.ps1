@@ -169,7 +169,8 @@ Set-EnvValue $LocalEnvPath "GITHUB_WEBHOOK_SECRET" "local-sandbox-secret"
 if (-not $SkipApi) {
   Stop-PidFileProcess $ApiPidPath
   Stop-LocalPortProcess 8000
-  $apiPython = Join-Path $Api ".venv\Scripts\python.exe"
+  # Development dependencies live in the repository-root virtual environment.
+  $apiPython = Join-Path $Root ".venv\Scripts\python.exe"
   $apiEnv = "FBJ_ENV_FILE=$LocalEnvPath"
   $apiProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "set `"$apiEnv`" && cd /d `"$Api`" && `"$apiPython`" -m uvicorn app.main:app --port 8000") -WindowStyle Hidden -RedirectStandardOutput $ApiLog -RedirectStandardError $ApiErrorLog -PassThru
   Set-Content -LiteralPath $ApiPidPath -Value $apiProcess.Id
