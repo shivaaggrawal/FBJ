@@ -43,9 +43,12 @@ def test_mongodb_store_persists_state_across_store_restarts():
                 "reward_amount": "1000000",
                 "maintainer_wallet": "0x" + "34" * 20,
                 "recipient_wallet": "0x" + "56" * 20,
+                "contributor_wallet": "0x" + "56" * 20,
+                "contributor_github_login": "developer",
+                "claim_expires_at": 1_900_000_000,
                 "expires_at": 1_900_000_000,
                 "challenge_seconds": 3600,
-                "status": "open",
+                "status": "claimed",
             })
             await first.save_evidence(review_record["id"], b'{"ok":true}', "0x" + "aa" * 32, "QmPersistenceCid")
             await first.create_dispute({
@@ -62,7 +65,7 @@ def test_mongodb_store_persists_state_across_store_restarts():
             second = MongoStore(uri, database)
             await second.ensure_indexes()
 
-            assert (await second.get_bounty(bounty_id))["status"] == "open"
+            assert (await second.get_bounty(bounty_id))["status"] == "claimed"
             assert (await second.find_bounty("owner/mongo-persistence"))["contract_bounty_id"] == bounty_id
             assert (await second.get_review(review_record["id"]))["dedupe_key"] == "mongo-persistence-review"
             evidence = await second.get_evidence(review_record["id"])

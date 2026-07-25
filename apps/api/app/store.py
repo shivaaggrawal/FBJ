@@ -31,6 +31,7 @@ class Store:
     async def list_bounties(self) -> list[dict[str, Any]]: ...
     async def get_bounty(self, contract_bounty_id: str) -> dict[str, Any] | None: ...
     async def update_bounty(self, contract_bounty_id: str, values: dict[str, Any]) -> None: ...
+    async def claim_bounty(self, contract_bounty_id: str, values: dict[str, Any]) -> dict[str, Any] | None: ...
     async def find_bounty(self, repository: str, issue_url: str | None = None) -> dict[str, Any] | None: ...
     async def create_dispute(self, dispute: dict[str, Any]) -> dict[str, Any]: ...
     async def get_dispute(self, bounty_id: str) -> dict[str, Any] | None: ...
@@ -92,11 +93,24 @@ class MemoryStore(Store):
             raise KeyError(contract_bounty_id)
         bounty.update(values | {"updated_at": utcnow()})
 
+    async def claim_bounty(self, contract_bounty_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
+        bounty = next((item for item in self.bounties.values() if item["contract_bounty_id"] == contract_bounty_id), None)
+        if bounty is None:
+            return None
+        now = int(utcnow().timestamp())
+        is_open = bounty["status"] == "open"
+        is_expired_claim = bounty["status"] == "claimed" and int(bounty.get("claim_expires_at") or 0) <= now
+        if not is_open and not is_expired_claim:
+            return None
+        bounty.update(values | {"status": "claimed", "updated_at": utcnow()})
+        return deepcopy(bounty)
+
     async def find_bounty(self, repository: str, issue_url: str | None = None) -> dict[str, Any] | None:
         for bounty in self.bounties.values():
             if (
                 bounty["repository"] == repository
-                and bounty["status"] == "open"
+                and bounty["status"] == "claimed"
+                and int(bounty.get("claim_expires_at") or 0) > int(utcnow().timestamp())
                 and (issue_url is None or bounty["issue_url"] == issue_url)
             ):
                 return deepcopy(bounty)
@@ -232,8 +246,30 @@ class MongoStore(Store):
             {"$set": values | {"updated_at": utcnow()}},
         )
 
+    async def claim_bounty(self, contract_bounty_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
+        from pymongo import ReturnDocument
+
+        now = int(utcnow().timestamp())
+        return await self.db.bounties.find_one_and_update(
+            {
+                "contract_bounty_id": contract_bounty_id,
+                "$or": [
+                    {"status": "open"},
+                    {"status": "claimed", "claim_expires_at": {"$lte": now}},
+                ],
+                "expires_at": {"$gt": now},
+            },
+            {"$set": values | {"status": "claimed", "updated_at": utcnow()}},
+            return_document=ReturnDocument.AFTER,
+            projection={"_id": 0},
+        )
+
     async def find_bounty(self, repository: str, issue_url: str | None = None) -> dict[str, Any] | None:
-        query: dict[str, Any] = {"repository": repository, "status": "open"}
+        query: dict[str, Any] = {
+            "repository": repository,
+            "status": "claimed",
+            "claim_expires_at": {"$gt": int(utcnow().timestamp())},
+        }
         if issue_url is not None:
             query["issue_url"] = issue_url
         return await self.db.bounties.find_one(query, {"_id": 0})

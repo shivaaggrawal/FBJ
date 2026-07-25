@@ -42,7 +42,7 @@ async def fixture_agent(agent: AgentName, review: ReviewInput, settings: Setting
     return AgentResult(agent=agent, score_bps=score, confidence_bps=9000, summary=f"Fixture {agent.value} review completed.", model=settings.ai_model, prompt_version="fixture-1")
 
 
-def supervise(results: list[AgentResult]) -> SupervisorResult:
+def supervise(results: list[AgentResult], input_errors: list[str] | None = None) -> SupervisorResult:
     scores = [result.score_bps for result in results]
     final_score = round(sum(scores) / len(scores))
     reasons = []
@@ -52,6 +52,7 @@ def supervise(results: list[AgentResult]) -> SupervisorResult:
         reasons.append("agent score spread exceeds 3,500 bps")
     if any(result.error for result in results):
         reasons.append("one or more review agents failed")
+    reasons.extend(input_errors or [])
     return SupervisorResult(final_score_bps=final_score, eligible=final_score >= 7000 and not reasons, flagged=bool(reasons), flag_reasons=reasons)
 
 
@@ -86,7 +87,7 @@ async def spam_node(state: ReviewGraphState) -> dict:
 
 async def supervisor_node(state: ReviewGraphState) -> dict:
     results = [state["quality"], state["security"], state["spam"]]
-    supervisor = supervise(results)
+    supervisor = supervise(results, state.get("errors", []))
     review = state["review"]
     evidence = EvidenceBundle(bounty_id=review.bounty_id, repository=review.repository, pr_number=review.pull_request_number,
         commit_sha=review.commit_sha, evaluated_at=datetime.now(timezone.utc), final_score_bps=supervisor.final_score_bps,

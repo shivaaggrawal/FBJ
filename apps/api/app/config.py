@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     chain_event_poll_seconds: int = 15
     chain_event_confirmations: int = 3
     chain_event_start_block: int | None = None
+    claim_seconds: int = 172_800
 
     @property
     def github_allowed_repositories(self) -> list[str]:
@@ -62,10 +63,16 @@ class Settings(BaseSettings):
         return all((self.github_app_id, self.github_app_private_key_b64))
 
     def validate_runtime(self) -> None:
+        is_local_sandbox = not self.fixture_mode and self.app_env == "development" and self.chain_id == 31337
         if self.database_mode not in {"memory", "mongodb"}:
             raise ValueError("DATABASE_MODE must be either memory or mongodb")
         if self.ai_provider not in {"fixture", "groq"}:
             raise ValueError("AI_PROVIDER must be either fixture or groq")
+        # Fixture scoring is deterministic demo data, not a safe fallback for
+        # a deployed reviewer. Refuse to start rather than publishing a
+        # plausible-looking verdict made from hard-coded scores.
+        if not self.fixture_mode and not is_local_sandbox and self.ai_provider != "groq":
+            raise ValueError("Non-fixture deployments require AI_PROVIDER=groq")
         if self.ipfs_provider not in {"fixture", "pinata"}:
             raise ValueError("IPFS_PROVIDER must be either fixture or pinata")
         if self.ai_provider == "groq" and self.groq_api_key is None:
@@ -74,7 +81,8 @@ class Settings(BaseSettings):
             raise ValueError("PINATA_JWT is required when IPFS_PROVIDER=pinata")
         if self.chain_event_poll_seconds <= 0 or self.chain_event_confirmations < 0:
             raise ValueError("Chain event polling values must be non-negative")
-        is_local_sandbox = not self.fixture_mode and self.app_env == "development" and self.chain_id == 31337
+        if self.claim_seconds <= 0:
+            raise ValueError("CLAIM_SECONDS must be positive")
         if not self.fixture_mode and not is_local_sandbox and self.database_mode != "mongodb":
             raise ValueError("Non-fixture deployments require DATABASE_MODE=mongodb")
         if not self.fixture_mode:

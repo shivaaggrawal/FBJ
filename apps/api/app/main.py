@@ -6,13 +6,22 @@ import asyncio
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.staticfiles import StaticFiles
 
 from .attestation import AttestationError, attest_review, release_bounty
-from .bounties import BountyRegistrationError, registration_message, verify_on_chain_bounty
+from .bounties import (
+    BountyClaimError,
+    BountyRegistrationError,
+    claim_message,
+    claim_values,
+    registration_message,
+    verify_claim_signature,
+    verify_on_chain_bounty,
+)
 from .chain import ChainClient, ChainError, build_chain_client
 from .config import Settings, get_settings
 from .disputes import (
@@ -33,6 +42,8 @@ from .github import GitHubAppClient
 from .ipfs import FixtureIpfsClient, IpfsClient, build_ipfs_client
 from .schemas import (
     BountyCreateRequest,
+    ClaimBountyMessageRequest,
+    ClaimBountyRequest,
     BountyRegistrationMessageResponse,
     BountyRegistrationRequest,
     BountyResponse,
@@ -111,9 +122,25 @@ async def health(settings: Settings = Depends(get_settings)) -> dict[str, str | 
 
 
 @app.get("/api/client-config")
-async def client_config(settings: Settings = Depends(get_settings)) -> dict[str, int | str | bool | None]:
+async def client_config(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     explorer_base_url = "https://amoy.polygonscan.com" if settings.chain_id == 80002 else None
     chain_name = "Polygon Amoy" if settings.chain_id == 80002 else "Hardhat Local" if settings.chain_id == 31337 else f"Chain {settings.chain_id}"
+    wallet_network = None
+    if settings.chain_id == 80002:
+        wallet_network = {
+            "chainId": hex(settings.chain_id),
+            "chainName": chain_name,
+            "rpcUrls": [settings.amoy_rpc_url or "https://rpc-amoy.polygon.technology/"],
+            "nativeCurrency": {"name": "POL", "symbol": "POL", "decimals": 18},
+            "blockExplorerUrls": ["https://amoy.polygonscan.com/"],
+        }
+    if settings.chain_id == 31337:
+        wallet_network = {
+            "chainId": hex(settings.chain_id),
+            "chainName": chain_name,
+            "rpcUrls": [settings.amoy_rpc_url or "http://127.0.0.1:8545"],
+            "nativeCurrency": {"name": "Hardhat ETH", "symbol": "ETH", "decimals": 18},
+        }
     return {
         "chain_id": settings.chain_id,
         "chain_hex": hex(settings.chain_id),
@@ -121,6 +148,7 @@ async def client_config(settings: Settings = Depends(get_settings)) -> dict[str,
         "explorer_base_url": explorer_base_url,
         "fixture_mode": settings.fixture_mode,
         "reward_token_address": settings.reward_token_address,
+        "wallet_network": wallet_network,
     }
 
 
@@ -192,6 +220,42 @@ async def get_bounty(contract_bounty_id: str, store: Store = Depends(get_store))
     if bounty is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bounty was not found")
     return bounty
+
+
+@app.post("/api/bounties/{contract_bounty_id}/claim-message", response_model=BountyRegistrationMessageResponse)
+async def bounty_claim_message(
+    contract_bounty_id: str,
+    claim: ClaimBountyMessageRequest,
+    store: Store = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    bounty = await store.get_bounty(contract_bounty_id)
+    if bounty is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bounty was not found")
+    if bounty["status"] not in {"open", "claimed"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bounty is not available to claim")
+    claim_request = ClaimBountyRequest(**claim.model_dump(), claim_signature="message-only")
+    return {"message": claim_message(contract_bounty_id, claim_request, settings)}
+
+
+@app.post("/api/bounties/{contract_bounty_id}/claim", response_model=BountyResponse)
+async def claim_bounty(
+    contract_bounty_id: str,
+    claim: ClaimBountyRequest,
+    store: Store = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    try:
+        verify_claim_signature(contract_bounty_id, claim, settings)
+    except BountyClaimError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    claimed = await store.claim_bounty(contract_bounty_id, claim_values(claim, settings))
+    if claimed is None:
+        bounty = await store.get_bounty(contract_bounty_id)
+        if bounty is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bounty was not found")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bounty has already been claimed or is no longer active")
+    return claimed
 
 
 @app.get("/api/bounties/{contract_bounty_id}/chain-state")
@@ -390,11 +454,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
         event = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON") from exc
-    # GitHub sends ``edited`` when a contributor adds or corrects the closing
-    # issue reference in the PR description after opening the PR.  That
-    # description is the bounty matching source, so it must trigger matching
-    # too.  ``dedupe_key`` still prevents a second review for the same commit.
-    if request.headers.get("x-github-event") != "pull_request" or event.get("action") not in {"opened", "synchronize", "reopened", "edited"}:
+    if request.headers.get("x-github-event") != "pull_request" or event.get("action") not in {"opened", "synchronize", "reopened"}:
         return GitHubWebhookResponse(request_id=str(uuid4()), status="ignored", delivery_id=x_github_delivery or "missing")
     delivery_id = x_github_delivery or hashlib.sha256(payload).hexdigest()
     if not await store.record_delivery(delivery_id, "pull_request", hashlib.sha256(payload).hexdigest()):
@@ -409,6 +469,15 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
     if bounty is None:
         logger.info("no matching bounty for PR", extra={"repository": repository, "issue_url": issue_url, "delivery_id": delivery_id})
         return GitHubWebhookResponse(request_id=str(uuid4()), status="no_matching_bounty", delivery_id=delivery_id)
+        return GitHubWebhookResponse(request_id=str(uuid4()), status="no_matching_claimed_bounty", delivery_id=delivery_id)
+    claimed_login = str(bounty.get("contributor_github_login") or "").lower()
+    author_login = str(pull_request.get("user", {}).get("login") or "").lower()
+    if claimed_login != author_login:
+        return GitHubWebhookResponse(request_id=str(uuid4()), status="claimant_mismatch", delivery_id=delivery_id)
+    claim_code = str(bounty.get("claim_code") or "")
+    claim_marker = f"FBJ-CLAIM:{claim_code}"
+    if not claim_code or claim_marker not in str(pull_request.get("body") or ""):
+        return GitHubWebhookResponse(request_id=str(uuid4()), status="claim_proof_missing", delivery_id=delivery_id)
     installation_id = event.get("installation", {}).get("id")
     commit_sha = pull_request.get("head", {}).get("sha")
     number = event.get("number")
@@ -416,6 +485,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed pull request payload")
     review_record, created = await store.create_review({"bounty_id": bounty["contract_bounty_id"], "repository": repository,
         "pr_number": number, "commit_sha": commit_sha, "dedupe_key": f"{repository}:{number}:{commit_sha}", "github_installation_id": installation_id, "status": "pending"})
+    if created:
+        await store.update_bounty(bounty["contract_bounty_id"], {"status": "under_review", "pull_request_number": number})
     has_github_installation = installation_id is not None or settings.github_installation_id is not None
     if created and settings.github_app_enabled and has_github_installation:
         check_run_id = await GitHubAppClient(settings, installation_id).create_pending_check(repository, commit_sha)

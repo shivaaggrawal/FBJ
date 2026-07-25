@@ -31,6 +31,18 @@ def test_fixture_workflow_is_eligible():
     assert result.supervisor.eligible
 
 
+def test_empty_review_input_is_ineligible_even_in_fixture_mode():
+    result = asyncio.run(run_review(sample_review(""), Settings()))
+    assert result.status == "flagged"
+    assert not result.supervisor.eligible
+    assert "No changed files or diff were supplied." in result.supervisor.flag_reasons
+
+
+def test_non_fixture_configuration_cannot_use_fixture_agent():
+    with pytest.raises(ValueError, match="Non-fixture deployments require AI_PROVIDER=groq"):
+        Settings(fixture_mode=False, ai_provider="fixture").validate_runtime()
+
+
 def test_langgraph_defines_parallel_agent_nodes():
     graph = build_review_graph()
     node_names = set(graph.get_graph().nodes)
