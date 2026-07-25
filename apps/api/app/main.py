@@ -61,6 +61,7 @@ from .store import DuplicateBounty, MemoryStore, MongoStore, Store
 from .worker import process_fixture_review, process_github_review
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -463,21 +464,21 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks, x_
         event = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON") from exc
-    # A contributor may add the closing reference after opening a PR. Treat
-    # that description edit as a review trigger too, rather than requiring an
-    # unrelated follow-up commit just to emit a `synchronize` event.
-    if request.headers.get("x-github-event") != "pull_request" or event.get("action") not in {"opened", "synchronize", "reopened", "edited"}:
+    if request.headers.get("x-github-event") != "pull_request" or event.get("action") not in {"opened", "synchronize", "reopened"}:
         return GitHubWebhookResponse(request_id=str(uuid4()), status="ignored", delivery_id=x_github_delivery or "missing")
     delivery_id = x_github_delivery or hashlib.sha256(payload).hexdigest()
     if not await store.record_delivery(delivery_id, "pull_request", hashlib.sha256(payload).hexdigest()):
         return GitHubWebhookResponse(request_id=str(uuid4()), status="duplicate", delivery_id=delivery_id)
     repository = event.get("repository", {}).get("full_name")
-    if settings.github_allowed_repositories and repository not in settings.github_allowed_repositories:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Repository is not allowlisted")
     pull_request = event.get("pull_request", {})
     issue_url = linked_issue_url(repository, pull_request.get("body"))
+    logger.info("github webhook received", extra={"delivery_id": delivery_id, "repository": repository, "issue_url": issue_url, "pr_number": pull_request.get("number")})
+    if settings.github_allowed_repositories and repository not in settings.github_allowed_repositories:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Repository is not allowlisted")
     bounty = await store.find_bounty(repository, issue_url) if issue_url else None
     if bounty is None:
+        logger.info("no matching bounty for PR", extra={"repository": repository, "issue_url": issue_url, "delivery_id": delivery_id})
+        return GitHubWebhookResponse(request_id=str(uuid4()), status="no_matching_bounty", delivery_id=delivery_id)
         return GitHubWebhookResponse(request_id=str(uuid4()), status="no_matching_claimed_bounty", delivery_id=delivery_id)
     claimed_login = str(bounty.get("contributor_github_login") or "").lower()
     author_login = str(pull_request.get("user", {}).get("login") or "").lower()
