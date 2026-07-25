@@ -13,7 +13,14 @@ function apiErrorMessage(detail, fallback) {
 const api = (path, options = {}) => fetch(path, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options })
   .then(async (response) => {
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(apiErrorMessage(body.detail, `Request failed (${response.status})`));
+    if (!response.ok) {
+      const message = apiErrorMessage(body.detail, `Request failed (${response.status})`);
+      if (message.includes("recipient_wallet") && message.includes("Field required") && !window.sessionStorage.getItem("fbj-stale-api-reload")) {
+        window.sessionStorage.setItem("fbj-stale-api-reload", "1");
+        window.location.reload();
+      }
+      throw new Error(message);
+    }
     return body;
   });
 

@@ -86,6 +86,16 @@ app.state.store = MemoryStore()  # Supports local tooling that does not trigger 
 app.state.ipfs = FixtureIpfsClient()
 app.state.chain = build_chain_client(get_settings())
 
+
+@app.middleware("http")
+async def prevent_dashboard_asset_caching(request: Request, call_next: Any) -> Response:
+    """Always serve the current dashboard after an API or UI upgrade."""
+    response = await call_next(request)
+    if request.url.path.startswith("/app"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
 _CLOSING_ISSUE_PATTERN = re.compile(
     r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*#(?P<number>\d+)\b",
     re.IGNORECASE,
