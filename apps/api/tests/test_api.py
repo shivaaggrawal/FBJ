@@ -162,6 +162,22 @@ def test_valid_supported_webhook_is_accepted(monkeypatch):
     assert response.json()["status"] == "accepted"
 
 
+def test_pr_description_edit_triggers_a_matching_bounty_review(monkeypatch):
+    monkeypatch.setattr("app.main.GitHubAppClient", FakeGitHubClient)
+    monkeypatch.setattr("app.worker.GitHubAppClient", FakeGitHubClient)
+    bounty_id = "0x" + "ac" * 32
+    bounty = client.post("/api/bounties", json={"contract_bounty_id": bounty_id, "repository": repository,
+        "issue_url": f"https://github.com/{repository}/issues/2", "reward_token": "0x" + "12" * 20,
+        "reward_amount": "1000000", "maintainer_wallet": "0x" + "34" * 20, "recipient_wallet": "0x" + "56" * 20,
+        "expires_at": 1_900_000_000, "challenge_seconds": 3600})
+    assert bounty.status_code == 201
+    payload = (f'{{"action":"edited","number":3,"repository":{{"full_name":"{repository}"}},"pull_request":{{"head":{{"sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},"title":"Test","body":"Closes #2","user":{{"login":"developer"}}}}}}').encode()
+    signature = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
+    response = client.post("/webhooks/github", content=payload, headers={"X-Hub-Signature-256": "sha256=" + signature, "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": "edited-description-delivery"})
+    assert response.status_code == 202
+    assert response.json()["status"] == "accepted"
+
+
 def test_duplicate_delivery_is_idempotent(monkeypatch):
     monkeypatch.setattr("app.main.GitHubAppClient", FakeGitHubClient)
     monkeypatch.setattr("app.worker.GitHubAppClient", FakeGitHubClient)
